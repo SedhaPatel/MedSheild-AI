@@ -9,5 +9,5 @@ build/
 *.egg-info/
 .env
 .superpowers/
-storage/
+/storage/
 tests/test_data/
