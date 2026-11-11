@@ -7,6 +7,7 @@ from medshield.api.middleware.mtls_auth import MTLSAuthMiddleware
 from medshield.api.middleware.audit_logger import AuditLoggingMiddleware
 from medshield.api.routes.studies import router as studies_router
 from medshield.api.routes.inference import router as inference_router
+from medshield.api.routes.dashboard import router as dashboard_router
 from medshield.utils.logging import configure_logging
 
 def create_app(settings: Optional[Settings] = None) -> FastAPI:
@@ -34,7 +35,13 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     # Register API Routers
     app.include_router(studies_router)
     app.include_router(inference_router)
+    app.include_router(dashboard_router)
     
+    @app.get("/", tags=["Dashboard"])
+    def root_dashboard():
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/dashboard")
+
     @app.get("/health", tags=["Health"])
     def health_check():
         return {

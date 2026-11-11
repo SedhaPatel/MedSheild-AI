@@ -174,36 +174,54 @@ MEDSHIELD_MODEL_ARCHITECTURE=efficientnet_v2_s
 
 ---
 
-## 6. Running the API Server & Endpoints
+## 6. Clinical Diagnostic & Security Dashboard
+
+MedShield-AI features an interactive, high-precision dark workstation UI designed for radiologists and compliance officers:
+
+- **Launch Dashboard:** Start the API gateway and visit `http://localhost:8000/dashboard` (or root `http://localhost:8000/`).
+- **Features Included:**
+  - **Drag-and-Drop Ingestion:** Supports `.dcm` and `.png` image uploads with 1-click clinical sample loaders (`patient_01_pneumonia`, `patient_02_effusion`, `patient_03_cardiomegaly`).
+  - **Side-by-Side De-Identification Matrix:** Full comparison table auditing raw HIPAA PII headers against anonymized counterparts with color-coded redaction badges.
+  - **Zero-Trust Storage Inspector:** Real-time AES-256-GCM container verification (`MEDENC01`), SHA-256 digest, Shannon entropy gauge ($\ge 7.99$ bits/byte), and binary hex wire preview.
+  - **Diagnostic AI & Grad-CAM Visualizer:** TorchXRayVision DenseNet121 probabilities across 5 thoracic diseases with calibrated epistemic uncertainty, emergency triage alerts (`STAT_CRITICAL`), and interactive Grad-CAM heatmap overlays with selectable target pathologies.
+  - **DPDP Act §12 Crypto-Shredder:** Interactive button demonstrating instant cryptographic erasure via Master KEK revocation.
+
+---
+
+## 7. Running the API Server & Endpoints
 
 ### Start the REST / DICOMweb Gateway
 ```bash
 uvicorn medshield.api.app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Visit the interactive OpenAPI documentation at `http://localhost:8000/docs`.
+Visit the interactive OpenAPI documentation at `http://localhost:8000/docs` and the web console at `http://localhost:8000/dashboard`.
 
 ### Key API Endpoints
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
+| `GET` | `/dashboard` | Interactive Clinical Diagnostic & Security Console. |
 | `GET` | `/health` | System health status, active cryptographic engine, and model architecture. |
+| `POST` | `/api/v1/dashboard/analyze` | Unified diagnostic analysis for file uploads or pre-packaged samples. |
+| `GET` | `/api/v1/dashboard/samples` | Lists available pre-packaged patient test cases. |
+| `POST` | `/api/v1/dashboard/shred/{study_uid}` | Executes DPDP Section 12 Crypto-Shredding demonstration. |
 | `POST` | `/api/v1/studies` | **DICOMweb STOW-RS:** Ingests raw DICOM, runs PS 3.15 de-identification, blacks out pixel PHI, encrypts via AES-256-GCM, and persists to storage. |
 | `POST` | `/api/v1/inference/{study_uid}` | Decrypts study in volatile RAM, runs thoracic multi-label disease classifier, and outputs calibrated probabilities and triage urgency. |
 | `GET` | `/api/v1/heatmaps/{study_uid}/{pathology}` | Generates and returns a blended Grad-CAM PNG activation overlay for visual pathology localization. |
 
 ---
 
-## 7. Verification & Audit Suite
+## 8. Verification & Audit Suite
 
-### Run the Full Automated Test Suite (28 Tests)
+### Run the Full Automated Test Suite (29 Tests)
 ```bash
 python -m pytest tests/ -v
 ```
 
-All 28 tests across metadata stripping, pixel cleaning, crypto envelope, ML inference, API endpoints, and compliance scanners will execute:
+All 29 tests across metadata stripping, pixel cleaning, crypto envelope, ML inference, API endpoints, and dashboard services will execute:
 ```text
-============================= 28 passed in 11.89s =============================
+======================= 29 passed in 27.93s =======================
 ```
 
 ### Run the Standalone End-to-End Verification Pipeline

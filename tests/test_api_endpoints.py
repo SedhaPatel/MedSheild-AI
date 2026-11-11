@@ -107,3 +107,33 @@ def test_empty_dicom_upload_raises_value_error():
     settings = Settings()
     with pytest.raises(ValueError):
         process_and_encrypt_study(contents=b"", settings=settings)
+
+def test_dashboard_ui_and_analysis_service(tmp_path):
+    from medshield.api.routes.dashboard import serve_dashboard_ui, list_dashboard_samples, analyze_dashboard_study
+    
+    # 1. UI HTML test
+    html_res = serve_dashboard_ui()
+    assert html_res.status_code == 200
+    assert "MedShield-AI" in html_res.body.decode("utf-8")
+    assert "Grad-CAM" in html_res.body.decode("utf-8")
+    
+    # 2. Samples listing
+    samples_res = list_dashboard_samples()
+    assert "samples" in samples_res
+    assert len(samples_res["samples"]) == 3
+    
+    # 3. Analyze sample study
+    settings = Settings(storage_path=str(tmp_path))
+    analysis = analyze_dashboard_study(
+        file=None,
+        sample_id="patient_01_pneumonia",
+        pathology_heatmap="Pneumonia",
+        settings=settings
+    )
+    assert analysis["status"] == "SUCCESS"
+    assert analysis["security"]["shannon_entropy_bits_per_byte"] >= 7.99
+    assert len(analysis["security"]["sha256_hash"]) == 64
+    assert len(analysis["deidentification"]["tag_diff_matrix"]) == 11
+    assert len(analysis["ai_diagnostics"]["predictions"]) == 5
+    assert analysis["images"]["gradcam_heatmap_url"].startswith("data:image/png;base64,")
+
