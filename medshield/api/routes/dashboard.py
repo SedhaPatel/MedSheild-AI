@@ -356,6 +356,25 @@ def demo_crypto_shredding(study_uid: str, settings: Settings = Depends(get_setti
     }
 
 
+@router.get("/api/v1/dashboard/download/{study_uid}", tags=["Clinical Dashboard"])
+def download_dashboard_study(study_uid: str, settings: Settings = Depends(get_settings)):
+    """Decrypts and delivers the de-identified radiograph for medical PACS review."""
+    store = _dashboard_store.get(settings.storage_path) or EncryptedStore(storage_dir=settings.storage_path)
+    if not store.exists(study_uid):
+        raise HTTPException(status_code=404, detail="Study not found in encrypted storage")
+    enc_blob = store.load(study_uid)
+    try:
+        decrypted_bytes = decrypt_envelope(enc_blob, _dashboard_kms)
+    except Exception as e:
+        raise HTTPException(status_code=410, detail=f"Study cannot be decrypted (possibly crypto-shredded): {str(e)}")
+
+    return Response(
+        content=decrypted_bytes,
+        media_type="application/dicom",
+        headers={"Content-Disposition": f'attachment; filename="sanitized_{study_uid[:12]}.dcm"'}
+    )
+
+
 @router.get("/dashboard", response_class=HTMLResponse, tags=["Clinical Dashboard"])
 def serve_dashboard_ui():
     """Serves the modern Tailwind CSS + Lucide Icons dark workstation UI."""

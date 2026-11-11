@@ -137,3 +137,30 @@ def test_dashboard_ui_and_analysis_service(tmp_path):
     assert len(analysis["ai_diagnostics"]["predictions"]) == 5
     assert analysis["images"]["gradcam_heatmap_url"].startswith("data:image/png;base64,")
 
+
+def test_dashboard_download_decrypted_scan(tmp_path):
+    from medshield.api.routes.dashboard import analyze_dashboard_study, download_dashboard_study
+    from fastapi import HTTPException
+
+    settings = Settings(storage_path=str(tmp_path))
+    analysis = analyze_dashboard_study(
+        file=None,
+        sample_id="patient_01_pneumonia",
+        pathology_heatmap="Pneumonia",
+        settings=settings
+    )
+    study_uid = analysis["anonymous_study_instance_uid"]
+
+    # 1. Download valid study
+    res = download_dashboard_study(study_uid=study_uid, settings=settings)
+    assert res.status_code == 200
+    assert res.media_type == "application/dicom"
+    assert "attachment; filename=" in res.headers["Content-Disposition"]
+    assert len(res.body) > 1000
+
+    # 2. Non-existent study throws 404
+    with pytest.raises(HTTPException) as exc_info:
+        download_dashboard_study(study_uid="2.25.00000000000000", settings=settings)
+    assert exc_info.value.status_code == 404
+
+
