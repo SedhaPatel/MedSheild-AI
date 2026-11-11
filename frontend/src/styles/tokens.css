@@ -1,0 +1,62 @@
+/* Design Tokens - Auto-generated */
+/* Do not edit directly - modify tokens.json instead */
+
+/* === PRIMITIVES === */
+:root {
+  --primitive-surface-0: #0C0E13;
+  --primitive-surface-1: #13161D;
+  --primitive-surface-2: #1A1D26;
+  --primitive-surface-3: #0F1117;
+  --primitive-surface-lightbox: #030406;
+  --primitive-ink-primary: #E8E9ED;
+  --primitive-ink-secondary: #A0A5B1;
+  --primitive-ink-muted: #787D8A;
+  --primitive-signal-emerald: #34D399;
+  --primitive-signal-amber: #FBBF24;
+  --primitive-signal-crimson: #F87171;
+  --primitive-signal-cobalt: #60A5FA;
+  --primitive-hairline-subtle: rgba(255, 255, 255, 0.07);
+  --primitive-hairline-strong: rgba(255, 255, 255, 0.16);
+  --primitive-hairline-focus: rgba(255, 255, 255, 0.24);
+  --primitive-hairline-film: rgba(255, 255, 255, 0.09);
+  --primitive-space-1: 4px;
+  --primitive-space-2: 8px;
+  --primitive-space-3: 12px;
+  --primitive-space-4: 16px;
+  --primitive-space-5: 20px;
+  --primitive-space-6: 24px;
+  --primitive-radius-viewport: 4px;
+  --primitive-radius-control: 6px;
+  --primitive-radius-panel: 8px;
+  --primitive-radius-dialog: 12px;
+}
+
+/* === SEMANTIC === */
+:root {
+  --bg-canvas: #0C0E13;
+  --bg-panel: #13161D;
+  --bg-elevated: #1A1D26;
+  --bg-input: #0F1117;
+  --bg-lightbox: #030406;
+  --text-primary: #E8E9ED;
+  --text-secondary: #A0A5B1;
+  --text-muted: #787D8A;
+  --accent-verified: #34D399;
+  --accent-attention: #FBBF24;
+  --accent-critical: #F87171;
+  --accent-info: #60A5FA;
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --border-focus: rgba(255, 255, 255, 0.24);
+  --border-film: rgba(255, 255, 255, 0.09);
+}
+
+/* === COMPONENTS === */
+:root {
+  --panel-radius: 8px;
+  --control-radius: 6px;
+  --viewport-radius: 4px;
+  --dialog-radius: 12px;
+  --panel-padding: 16px;
+  --control-gap: 8px;
+}

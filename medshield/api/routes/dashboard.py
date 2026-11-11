@@ -391,19 +391,23 @@ def analyze_dashboard_study(
             "raw_image_url": raw_image_data_url,
             "redacted_image_url": redacted_image_data_url,
             "gradcam_heatmap_url": heatmap_data_url
-        }
+        },
+        "worklist": _get_sorted_worklist(),
     }
+
+
+def _get_sorted_worklist() -> List[Dict[str, Any]]:
+    urgency_rank = {"STAT_CRITICAL": 0, "ELEVATED": 1, "ROUTINE": 2}
+    return sorted(
+        _dashboard_worklist.values(),
+        key=lambda item: (urgency_rank.get(item["overall_triage_urgency"], 9), item["ingested_at_utc"]),
+    )
 
 
 @router.get("/api/v1/dashboard/worklist", tags=["Clinical Dashboard"])
 def list_dashboard_worklist():
     """Returns ingested studies sorted by AI clinical triage urgency then recency."""
-    urgency_rank = {"STAT_CRITICAL": 0, "ELEVATED": 1, "ROUTINE": 2}
-    items = sorted(
-        _dashboard_worklist.values(),
-        key=lambda item: (urgency_rank.get(item["overall_triage_urgency"], 9), item["ingested_at_utc"]),
-    )
-    return {"worklist": items}
+    return {"worklist": _get_sorted_worklist()}
 
 
 @router.get("/api/v1/dashboard/studies/{study_uid}/dicom", tags=["Clinical Dashboard"])
@@ -472,7 +476,8 @@ def demo_crypto_shredding(study_uid: str, settings: Settings = Depends(get_setti
         "revoked_kek_id": study_kek_id,
         "math_erasure_verified": verification_failed,
         "legal_standard": "India DPDP Act 2023 Section 12 & HIPAA §164.312",
-        "message": "Study Master KEK overwritten with zeroes. Ciphertext is now mathematically irreversible noise."
+        "message": "Study Master KEK overwritten with zeroes. Ciphertext is now mathematically irreversible noise.",
+        "worklist": _get_sorted_worklist(),
     }
 
 

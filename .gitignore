@@ -15,3 +15,6 @@ skills-lock.json
 tests/test_data/
 weights/
 .claude/
+node_modules/
+frontend/dist/
+frontend/node_modules/
