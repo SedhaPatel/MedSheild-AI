@@ -63,8 +63,9 @@ class InferenceEngine:
             
         return {
             "study_instance_uid": study_uid,
-            "model_name": "EfficientNet-V2-S-Thoracic-Triage-v1",
-            "model_checkpoint_sha256": "mock-verified-sha256-checkpoint",
+            "model_name": getattr(self.model, "model_name", "EfficientNet-V2-S-Thoracic-Triage-v1"),
+            "is_real_weights": getattr(self.model, "is_real_weights", False),
+            "weights_source": getattr(self.model, "weights_source", "Random/Uninitialized"),
             "inference_latency_ms": latency_ms,
             "predictions": predictions
         }

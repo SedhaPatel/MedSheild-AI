@@ -13,3 +13,5 @@ build/
 skills-lock.json
 /storage/
 tests/test_data/
+weights/
+.claude/
