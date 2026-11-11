@@ -7,10 +7,16 @@ from medshield.anonymization.uid_hasher import generate_pseudonymized_uid
 from medshield.anonymization.date_shifter import compute_patient_day_offset, shift_dicom_dates
 from medshield.anonymization.metadata import anonymize_dicom_metadata, PS315_TAGS_TO_REMOVE, PS315_TAGS_TO_ZERO
 
+from pydicom.uid import ExplicitVRLittleEndian
+
 def create_sample_dicom() -> Dataset:
+    file_meta = FileMetaDataset()
+    file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    file_meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.1"
+    file_meta.MediaStorageSOPInstanceUID = "1.2.840.113619.2.55.3.6046883.849.1122334455"
+    
     ds = Dataset()
-    ds.is_little_endian = True
-    ds.is_implicit_VR = False
+    ds.file_meta = file_meta
     
     # Identifiable Metadata (HIPAA Safe Harbor)
     ds.PatientName = "DOE^JOHN^A"

@@ -9,9 +9,13 @@ from medshield.utils.dicom_helpers import extract_pixel_array, write_pixel_array
 from medshield.anonymization.pixel_cleaner import clean_pixel_annotations, detect_text_regions
 
 def create_dicom_with_burned_in_text(has_text: bool = True) -> Dataset:
+    file_meta = FileMetaDataset()
+    file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    file_meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.6.1"
+    file_meta.MediaStorageSOPInstanceUID = "2.25.123456789"
+
     ds = Dataset()
-    ds.is_little_endian = True
-    ds.is_implicit_VR = False
+    ds.file_meta = file_meta
     
     ds.Rows = 256
     ds.Columns = 256

@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 import torch
 import pydicom
-from pydicom.dataset import Dataset
+from pydicom.dataset import Dataset, FileMetaDataset
+from pydicom.uid import ExplicitVRLittleEndian
 from PIL import Image
 
 from medshield.ml.preprocessor import DICOMPreprocessor
@@ -11,9 +12,13 @@ from medshield.ml.explainability import GradCAM
 from medshield.ml.inference_engine import InferenceEngine
 
 def create_synthetic_xray_dicom(inverted: bool = False) -> Dataset:
+    file_meta = FileMetaDataset()
+    file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    file_meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.1"
+    file_meta.MediaStorageSOPInstanceUID = "2.25.1029384756"
+    
     ds = Dataset()
-    ds.is_little_endian = True
-    ds.is_implicit_VR = False
+    ds.file_meta = file_meta
     
     ds.Rows = 512
     ds.Columns = 512

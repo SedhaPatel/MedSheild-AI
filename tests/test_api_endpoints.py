@@ -20,8 +20,6 @@ def create_raw_dicom_bytes(with_burned_text: bool = False) -> bytes:
     
     ds = Dataset()
     ds.file_meta = file_meta
-    ds.is_little_endian = True
-    ds.is_implicit_VR = False
     
     ds.PatientName = "DOE^JANE"
     ds.PatientID = "HOSP-991122"

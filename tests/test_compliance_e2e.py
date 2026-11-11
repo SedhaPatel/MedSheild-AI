@@ -24,8 +24,6 @@ def create_synthetic_phi_study(patient_idx: int) -> bytes:
     
     ds = Dataset()
     ds.file_meta = file_meta
-    ds.is_little_endian = True
-    ds.is_implicit_VR = False
     
     # 18 HIPAA Safe Harbor PHI fields
     ds.PatientName = f"PATIENT_SURNAME^FIRSTNAME_{patient_idx}"
