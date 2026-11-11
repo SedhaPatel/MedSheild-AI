@@ -386,12 +386,12 @@ DASHBOARD_HTML_PAGE = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MedShield-AI &bull; Clinical Diagnostic &amp; Security Workstation</title>
+  <title>MedShield-AI &bull; Clinical Diagnostic &amp; Security Console</title>
   
-  <!-- Modern Fonts -->
+  <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   
   <!-- Tailwind CSS 3.x CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -401,19 +401,14 @@ DASHBOARD_HTML_PAGE = """<!DOCTYPE html>
       theme: {
         extend: {
           colors: {
-            obsidian: '#070a12',
-            canvas: '#0b101b',
-            panel: '#101726',
-            panelElevated: '#172238',
-            panelBorder: '#1e2d4a',
-            panelBorderFocus: '#0284c7',
-            cyanGlow: '#06b6d4',
-            emeraldGlow: '#10b981',
-            amberGlow: '#f59e0b',
-            crimsonGlow: '#ef4444'
+            obsidian: '#080C14',
+            cardBg: '#0E1524',
+            cardHover: '#141E33',
+            borderSubtle: '#1E2A44',
+            surfaceWell: '#121B2D',
           },
           fontFamily: {
-            sans: ['Plus Jakarta Sans', 'Inter', 'system-ui', 'sans-serif'],
+            sans: ['Plus Jakarta Sans', 'system-ui', 'sans-serif'],
             mono: ['JetBrains Mono', 'monospace'],
           }
         }
@@ -425,321 +420,244 @@ DASHBOARD_HTML_PAGE = """<!DOCTYPE html>
   <script src="https://unpkg.com/lucide@latest"></script>
 
   <style>
-    /* Custom Scrollbar for Medical Tables */
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #070a12; }
-    ::-webkit-scrollbar-thumb { background: #1e2d4a; border-radius: 4px; }
-    ::-webkit-scrollbar-thumb:hover { background: #0284c7; }
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: #080C14; }
+    ::-webkit-scrollbar-thumb { background: #1E2A44; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #0EA5E9; }
 
     /* Floating Toast Animation */
-    .toast-enter { transform: translateY(20px); opacity: 0; }
-    .toast-enter-active { transform: translateY(0); opacity: 1; transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
-    .toast-exit { transform: translateY(-10px); opacity: 0; transition: all 0.2s ease-in; }
+    .toast-anim { animation: toastSlide 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+    @keyframes toastSlide {
+      from { transform: translateY(-12px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
   </style>
 </head>
 <body class="bg-obsidian text-slate-100 font-sans min-h-screen flex flex-col selection:bg-cyan-500/20 selection:text-cyan-300">
 
-  <!-- Top Enterprise Medical Header -->
-  <header class="bg-panel/90 backdrop-blur-md border-b border-panelBorder px-6 py-3.5 sticky top-0 z-40 flex flex-wrap items-center justify-between gap-4">
-    <div class="flex items-center gap-3.5">
-      <div class="bg-gradient-to-br from-sky-500 to-cyan-500 text-white font-bold text-xs px-2.5 py-1.5 rounded-lg shadow-lg shadow-cyan-500/20 flex items-center gap-1.5">
-        <i data-lucide="shield-check" class="w-4 h-4"></i>
-        <span>FIPS 140-3</span>
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="fixed top-4 right-4 z-50 flex flex-col gap-2.5 max-w-md w-full pointer-events-none"></div>
+
+  <!-- TOP BAR: Minimalist Branding + Security Pill -->
+  <header class="h-14 bg-cardBg/90 backdrop-blur-md border-b border-borderSubtle px-6 sticky top-0 z-40 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-sky-600 flex items-center justify-center text-white shadow-md shadow-cyan-500/20">
+        <i data-lucide="shield" class="w-4 h-4"></i>
       </div>
-      <div>
-        <h1 class="text-base font-bold tracking-tight text-white flex items-center gap-2">
-          MedShield-AI
-          <span class="text-xs font-normal text-slate-400 bg-panelElevated px-2 py-0.5 rounded-full border border-panelBorder">Clinical Console v1.0</span>
-        </h1>
-        <p class="text-xs text-slate-400">Zero-Trust DICOM PS 3.15 De-Identification &bull; AES-256-GCM Envelope &bull; DenseNet-121 Grad-CAM</p>
+      <div class="flex items-center gap-2">
+        <span class="text-sm font-bold tracking-tight text-white">MedShield-AI</span>
+        <span class="text-[11px] font-medium text-slate-400 bg-surfaceWell px-2 py-0.5 rounded border border-borderSubtle">Clinical Console</span>
       </div>
     </div>
 
-    <!-- Active Status Indicators -->
-    <div class="flex items-center gap-2.5 flex-wrap">
-      <div class="flex items-center gap-2 bg-canvas px-3 py-1.5 rounded-full border border-panelBorder text-xs text-slate-300">
-        <span class="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]"></span>
-        <span>Local KMS Active</span>
-      </div>
-      <div class="flex items-center gap-2 bg-canvas px-3 py-1.5 rounded-full border border-panelBorder text-xs text-slate-300">
-        <span class="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_#38bdf8]"></span>
-        <span>TorchXRayVision (NIH/CheXpert)</span>
-      </div>
-      <div class="flex items-center gap-2 bg-canvas px-3 py-1.5 rounded-full border border-panelBorder text-xs text-slate-300">
-        <span class="w-2 h-2 rounded-full bg-indigo-400 shadow-[0_0_8px_#818cf8]"></span>
-        <span>HIPAA &amp; India DPDP 2023</span>
-      </div>
+    <!-- Security Assurance Pill -->
+    <div class="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium">
+      <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+      <span>System Secure (AES-256 / TLS 1.3)</span>
     </div>
   </header>
 
-  <!-- Main Workstation Layout (3-Column Grid) -->
-  <main class="flex-1 p-5 max-w-[1850px] w-full mx-auto grid grid-cols-1 lg:grid-cols-12 gap-5">
+  <!-- MAIN PROGRESSIVE DISCLOSURE AREA (2 Clean Cards Side-by-Side) -->
+  <main class="flex-1 p-6 max-w-6xl w-full mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
     
-    <!-- LEFT COLUMN: Ingestion & Case Presets (col-span-3) -->
-    <section class="lg:col-span-3 flex flex-col gap-4">
+    <!-- LEFT CARD: Medical Scan Viewport & Upload Stage -->
+    <section class="bg-cardBg border border-borderSubtle rounded-2xl p-5 shadow-xl flex flex-col min-h-[580px]">
       
-      <!-- Ingestion Card -->
-      <div class="bg-panel border border-panelBorder rounded-xl p-4 shadow-xl">
-        <div class="flex items-center justify-between pb-3 border-b border-panelBorder mb-3.5">
-          <div class="flex items-center gap-2 text-sm font-semibold text-white">
-            <i data-lucide="upload-cloud" class="w-4 h-4 text-cyan-400"></i>
-            <span>Study Ingestion</span>
-          </div>
-          <span class="text-[11px] font-mono text-cyan-400/80 bg-cyan-950/40 px-2 py-0.5 rounded border border-cyan-800/40">DICOMweb STOW-RS</span>
+      <div class="flex items-center justify-between pb-3 border-b border-borderSubtle mb-4">
+        <div class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400">
+          <i data-lucide="image" class="w-4 h-4 text-cyan-400"></i>
+          <span>Medical Radiograph</span>
         </div>
+        <button id="resetScanBtn" onclick="resetToUpload()" class="hidden text-xs text-slate-400 hover:text-white flex items-center gap-1 transition-colors">
+          <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+          <span>New Scan</span>
+        </button>
+      </div>
 
-        <!-- Drag & Drop Zone -->
-        <div id="dropzone" class="border-2 border-dashed border-panelBorder hover:border-cyan-500/70 bg-canvas/60 hover:bg-cyan-500/5 rounded-xl p-5 text-center cursor-pointer transition-all duration-200 group">
-          <div class="w-12 h-12 rounded-full bg-panelElevated border border-panelBorder mx-auto flex items-center justify-center text-cyan-400 mb-2.5 group-hover:scale-110 transition-transform">
-            <i data-lucide="file-up" class="w-6 h-6"></i>
+      <!-- State 1: Pre-Upload Drag & Drop Zone -->
+      <div id="dropzoneContainer" class="flex-1 flex flex-col justify-center">
+        <div id="dropzone" class="border-2 border-dashed border-borderSubtle hover:border-cyan-500/60 bg-surfaceWell/60 hover:bg-cyan-500/5 rounded-xl p-8 text-center cursor-pointer transition-all duration-200 group">
+          <div class="w-14 h-14 rounded-2xl bg-cardBg border border-borderSubtle mx-auto flex items-center justify-center text-cyan-400 mb-3 group-hover:scale-105 transition-transform shadow-inner">
+            <i data-lucide="cloud-upload" class="w-7 h-7"></i>
           </div>
-          <p class="text-xs font-semibold text-white">Drop DICOM (.dcm) or Scan (.png)</p>
-          <p class="text-[11px] text-slate-400 mt-1">Automatic 18 Safe Harbor Tag Stripping &amp; Pixel Redaction</p>
+          <p class="text-sm font-semibold text-white">Drop DICOM (.dcm) or Scan (.png)</p>
+          <p class="text-xs text-slate-400 mt-1 max-w-xs mx-auto">DICOM PS 3.15 de-identification and AES-256-GCM encryption run instantly upon upload.</p>
           <input type="file" id="fileInput" class="hidden" accept=".dcm,.png,.jpg,.jpeg">
         </div>
 
-        <!-- Loading Feedback Bar -->
-        <div id="loader" class="hidden mt-3 p-3 bg-panelElevated/80 border border-cyan-500/30 rounded-lg flex items-center gap-3">
-          <div class="w-4 h-4 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin"></div>
-          <div class="text-xs text-cyan-300 font-medium" id="loaderText">Processing DICOM &amp; AI Inference...</div>
-        </div>
-
-        <!-- Quick-Select Clinical Samples -->
-        <div class="mt-4 pt-3 border-t border-panelBorder">
-          <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-            <i data-lucide="folder-git-2" class="w-3.5 h-3.5"></i>
-            <span>Pre-Packaged Clinical Cases</span>
-          </h2>
-
-          <div class="space-y-2" id="presetList">
-            <button onclick="loadSample('patient_01_pneumonia')" class="w-full text-left p-3 rounded-lg bg-canvas/70 hover:bg-panelElevated border border-panelBorder hover:border-cyan-500/50 transition-all group">
-              <div class="flex items-center justify-between">
-                <span class="text-xs font-semibold text-white group-hover:text-cyan-300 transition-colors">Patient 01: Pneumonia</span>
-                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30">ELEVATED</span>
-              </div>
-              <p class="text-[11px] text-slate-400 mt-1">Confirmed bilateral alveolar infiltrates &bull; Urgent Triage</p>
+        <!-- 3 Quick Pre-Packaged Cases -->
+        <div class="mt-6">
+          <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2.5">Or test with a pre-packaged clinical case:</p>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <button onclick="loadSample('patient_01_pneumonia')" class="p-2.5 rounded-lg bg-surfaceWell hover:bg-cardHover border border-borderSubtle hover:border-cyan-500/50 text-left transition-all">
+              <span class="text-xs font-semibold text-white block">Patient 01</span>
+              <span class="text-[10px] text-amber-400 font-medium">Pneumonia</span>
             </button>
-
-            <button onclick="loadSample('patient_02_effusion')" class="w-full text-left p-3 rounded-lg bg-canvas/70 hover:bg-panelElevated border border-panelBorder hover:border-cyan-500/50 transition-all group">
-              <div class="flex items-center justify-between">
-                <span class="text-xs font-semibold text-white group-hover:text-cyan-300 transition-colors">Patient 02: Pleural Effusion</span>
-                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30">ELEVATED</span>
-              </div>
-              <p class="text-[11px] text-slate-400 mt-1">Blunted costophrenic angles with fluid layering</p>
+            <button onclick="loadSample('patient_02_effusion')" class="p-2.5 rounded-lg bg-surfaceWell hover:bg-cardHover border border-borderSubtle hover:border-cyan-500/50 text-left transition-all">
+              <span class="text-xs font-semibold text-white block">Patient 02</span>
+              <span class="text-[10px] text-amber-400 font-medium">Pleural Effusion</span>
             </button>
-
-            <button onclick="loadSample('patient_03_cardiomegaly')" class="w-full text-left p-3 rounded-lg bg-canvas/70 hover:bg-panelElevated border border-panelBorder hover:border-cyan-500/50 transition-all group">
-              <div class="flex items-center justify-between">
-                <span class="text-xs font-semibold text-white group-hover:text-cyan-300 transition-colors">Patient 03: Cardiomegaly</span>
-                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30">ELEVATED</span>
-              </div>
-              <p class="text-[11px] text-slate-400 mt-1">Enlarged cardiac silhouette (CTR > 0.55)</p>
+            <button onclick="loadSample('patient_03_cardiomegaly')" class="p-2.5 rounded-lg bg-surfaceWell hover:bg-cardHover border border-borderSubtle hover:border-cyan-500/50 text-left transition-all">
+              <span class="text-xs font-semibold text-white block">Patient 03</span>
+              <span class="text-[10px] text-amber-400 font-medium">Cardiomegaly</span>
             </button>
           </div>
         </div>
-
       </div>
 
-      <!-- System Quick Spec -->
-      <div class="bg-panel border border-panelBorder rounded-xl p-4 text-xs text-slate-400 space-y-2">
-        <div class="flex justify-between items-center text-slate-300 font-medium">
-          <span>Target Pathologies:</span>
-          <span class="text-cyan-400">5 Classes</span>
+      <!-- Loading State -->
+      <div id="loader" class="hidden flex-1 flex flex-col items-center justify-center p-8 text-center">
+        <div class="w-10 h-10 border-2 border-cyan-400/20 border-t-cyan-400 rounded-full animate-spin mb-3"></div>
+        <p class="text-sm font-semibold text-white" id="loaderText">De-identifying &amp; evaluating radiograph...</p>
+        <p class="text-xs text-slate-400 mt-1">Executing DICOM PS 3.15 redaction, AES-256 sealing, and DenseNet-121 inference</p>
+      </div>
+
+      <!-- State 2: Loaded Medical Scan Viewport -->
+      <div id="scanStage" class="hidden flex-1 flex flex-col">
+        <div class="relative bg-black rounded-xl border border-borderSubtle flex items-center justify-center h-[400px] overflow-hidden">
+          <img id="mainScanImg" src="" alt="Medical Scan" class="max-h-[390px] max-w-full object-contain transition-opacity duration-300">
         </div>
-        <div class="flex justify-between items-center">
-          <span>Inference Hardware:</span>
-          <span>Torch Core (CPU / TensorRT)</span>
+
+        <!-- Heatmap Toggle Switch -->
+        <div class="mt-4 p-3 rounded-xl bg-surfaceWell border border-borderSubtle flex items-center justify-between">
+          <div class="flex items-center gap-2.5">
+            <i data-lucide="flame" class="w-4 h-4 text-orange-400"></i>
+            <div>
+              <span class="text-xs font-semibold text-white block">Show AI Heatmap (Grad-CAM)</span>
+              <span class="text-[11px] text-slate-400 block">Highlights anatomical regions driving model prediction</span>
+            </div>
+          </div>
+          
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" id="heatmapToggle" onchange="onToggleHeatmap(this.checked)" class="sr-only peer">
+            <div class="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-500"></div>
+          </label>
         </div>
-        <div class="flex justify-between items-center">
-          <span>De-ID Profile:</span>
-          <span>DICOM PS 3.15 Annex E</span>
+
+        <!-- Pathology Selector (Visible when Heatmap is ON) -->
+        <div id="pathologySelectorContainer" class="hidden mt-2 flex items-center justify-between px-1 text-xs">
+          <span class="text-slate-400">Focus finding:</span>
+          <select id="pathologySelect" onchange="changeHeatmapTarget()" class="bg-surfaceWell border border-borderSubtle rounded px-2.5 py-1 text-xs text-white focus:outline-none focus:border-cyan-400">
+            <option value="Pneumonia">Pneumonia</option>
+            <option value="Cardiomegaly">Cardiomegaly</option>
+            <option value="Pleural Effusion">Pleural Effusion</option>
+            <option value="Pneumothorax">Pneumothorax</option>
+            <option value="Atelectasis">Atelectasis</option>
+          </select>
         </div>
       </div>
 
     </section>
 
-    <!-- CENTER COLUMN: Diagnostic Stage, PACS Tools & Grad-CAM (col-span-6) -->
-    <section class="lg:col-span-6 flex flex-col gap-4">
+    <!-- RIGHT CARD: Clinical Diagnosis & Security Summary -->
+    <section class="bg-cardBg border border-borderSubtle rounded-2xl p-5 shadow-xl flex flex-col min-h-[580px]">
       
-      <!-- Diagnostic Viewer Card -->
-      <div class="bg-panel border border-panelBorder rounded-xl p-4 shadow-xl flex flex-col flex-1">
+      <div class="flex items-center justify-between pb-3 border-b border-borderSubtle mb-4">
+        <div class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400">
+          <i data-lucide="activity" class="w-4 h-4 text-cyan-400"></i>
+          <span>Diagnosis &amp; Security Summary</span>
+        </div>
+        <span id="scanFilename" class="text-xs font-mono text-slate-400">Awaiting study</span>
+      </div>
+
+      <!-- State 1: Pre-Upload Placeholder -->
+      <div id="rightPlaceholder" class="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-500">
+        <div class="w-12 h-12 rounded-xl bg-surfaceWell border border-borderSubtle flex items-center justify-center text-slate-400 mb-3">
+          <i data-lucide="stethoscope" class="w-6 h-6"></i>
+        </div>
+        <p class="text-sm font-semibold text-slate-300">Awaiting Study Ingestion</p>
+        <p class="text-xs text-slate-400 mt-1 max-w-xs">Upload a chest radiograph or choose a patient case to view disease probabilities and cryptographic security metrics.</p>
+      </div>
+
+      <!-- State 2: Post-Upload Clinical & Security Panel -->
+      <div id="rightContent" class="hidden flex-1 flex flex-col justify-between space-y-4">
         
-        <!-- Viewer Header -->
-        <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-panelBorder mb-3">
+        <!-- SECTION 1: Primary AI Prediction -->
+        <div class="space-y-2.5">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold uppercase tracking-wider text-slate-400">Primary AI Prediction</span>
+            <span id="triageBadge" class="text-[10px] font-bold px-2 py-0.5 rounded border"></span>
+          </div>
+
+          <div class="p-4 rounded-xl bg-surfaceWell border border-borderSubtle">
+            <div class="flex items-baseline justify-between mb-2">
+              <h2 id="topFindingName" class="text-lg font-bold text-white tracking-tight">--</h2>
+              <span id="topConfidence" class="text-base font-mono font-bold text-cyan-400">--%</span>
+            </div>
+            
+            <!-- Clean Confidence Bar -->
+            <div class="w-full bg-slate-900 rounded-full h-2.5 overflow-hidden border border-borderSubtle mb-2">
+              <div id="confidenceBar" class="h-2.5 rounded-full bg-gradient-to-r from-sky-500 to-cyan-400 transition-all duration-700" style="width: 0%"></div>
+            </div>
+
+            <!-- Single-line Secondary Screenings -->
+            <p id="secondaryFindings" class="text-[11px] text-slate-400 truncate"></p>
+          </div>
+        </div>
+
+        <!-- SECTION 2: Compact Security Badge -->
+        <div class="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between">
           <div class="flex items-center gap-2">
-            <i data-lucide="scan" class="w-4 h-4 text-cyan-400"></i>
-            <span class="text-sm font-semibold text-white">Diagnostic Stage &amp; Explainability</span>
+            <i data-lucide="shield-check" class="w-4 h-4 text-emerald-400"></i>
+            <span class="text-xs font-semibold text-emerald-300">PII Stripped &bull; AES-256 Encrypted</span>
           </div>
-          
-          <div id="triageBadge">
-            <span class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-panelElevated text-slate-400 border border-panelBorder">
-              Awaiting Study Ingestion
-            </span>
-          </div>
+          <span id="entropyScore" class="text-[11px] font-mono text-emerald-400 font-medium">Entropy 7.999 / 8.0</span>
         </div>
 
-        <!-- Mode Select Tabs -->
-        <div class="grid grid-cols-3 gap-2 p-1.5 bg-canvas rounded-xl border border-panelBorder mb-3">
-          <button id="tabRaw" onclick="switchView('raw')" class="py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-300 hover:text-white transition-all">
-            Raw Radiograph (with PHI)
-          </button>
-          <button id="tabRedacted" onclick="switchView('redacted')" class="py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-300 hover:text-white transition-all">
-            De-Identified Matrix
-          </button>
-          <button id="tabHeatmap" onclick="switchView('heatmap')" class="py-1.5 px-3 rounded-lg text-xs font-bold text-cyan-400 bg-panelElevated shadow border border-panelBorder transition-all flex items-center justify-center gap-1.5">
-            <i data-lucide="flame" class="w-3.5 h-3.5 text-orange-400"></i>
-            <span>Grad-CAM Heatmap</span>
-          </button>
-        </div>
-
-        <!-- PACS Viewport Stage -->
-        <div class="relative bg-black rounded-xl border border-panelBorder overflow-hidden flex items-center justify-center min-h-[460px] max-h-[500px] select-none group">
-          
-          <img id="mainDisplayImg" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='400' height='300' viewBox='0 0 400 300'><rect width='400' height='300' fill='%23070a12'/><text x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%23475569' font-family='sans-serif' font-size='13'>Upload or select a patient study to begin</text></svg>" alt="Medical Chest Radiograph" class="max-w-full max-h-[460px] object-contain transition-transform duration-100">
-
-          <!-- Heatmap Layer Canvas (For Dynamic Opacity Blending) -->
-          <canvas id="heatmapCanvas" class="absolute inset-0 w-full h-full object-contain pointer-events-none opacity-80 hidden"></canvas>
-
-          <!-- Interactive Viewport Controls (Overlay) -->
-          <div id="overlayControls" class="absolute bottom-3 left-3 right-3 bg-panel/90 backdrop-blur-md border border-panelBorder rounded-lg px-3 py-2 flex flex-wrap items-center justify-between gap-3 text-xs opacity-90 hover:opacity-100 transition-opacity">
+        <!-- SECTION 3: Collapsible Drawer (Hidden by default) -->
+        <div class="border border-borderSubtle rounded-xl overflow-hidden bg-surfaceWell/50">
+          <button onclick="toggleAuditDrawer()" class="w-full p-3 flex items-center justify-between text-xs font-semibold text-slate-300 hover:text-white hover:bg-surfaceWell transition-colors">
             <div class="flex items-center gap-2">
-              <span class="text-slate-400 font-medium">Target Pathology:</span>
-              <select id="pathologySelect" onchange="changeHeatmapPathology()" class="bg-canvas border border-panelBorder rounded px-2.5 py-1 text-xs text-white focus:outline-none focus:border-cyan-400">
-                <option value="Pneumonia">Pneumonia</option>
-                <option value="Cardiomegaly">Cardiomegaly</option>
-                <option value="Pleural Effusion">Pleural Effusion</option>
-                <option value="Pneumothorax">Pneumothorax</option>
-                <option value="Atelectasis">Atelectasis</option>
-              </select>
+              <i data-lucide="file-check-2" class="w-4 h-4 text-cyan-400"></i>
+              <span>View Stripped DICOM Tags &amp; Hash</span>
             </div>
-
-            <!-- Heatmap Opacity Slider -->
-            <div class="flex items-center gap-2">
-              <span class="text-slate-400">Heatmap Alpha:</span>
-              <input type="range" id="opacitySlider" min="0" max="100" value="70" oninput="adjustHeatmapOpacity(this.value)" class="w-24 accent-cyan-400 cursor-pointer">
-              <span id="opacityLabel" class="font-mono text-cyan-300 w-8 text-right">70%</span>
-            </div>
-
-            <!-- Zoom & Pan Reset -->
-            <div class="flex items-center gap-1">
-              <button onclick="zoomImage(1.15)" title="Zoom In" class="p-1 rounded hover:bg-panelElevated text-slate-300 hover:text-white"><i data-lucide="zoom-in" class="w-4 h-4"></i></button>
-              <button onclick="zoomImage(0.85)" title="Zoom Out" class="p-1 rounded hover:bg-panelElevated text-slate-300 hover:text-white"><i data-lucide="zoom-out" class="w-4 h-4"></i></button>
-              <button onclick="resetZoom()" title="Reset View" class="p-1 rounded hover:bg-panelElevated text-slate-300 hover:text-white"><i data-lucide="rotate-ccw" class="w-4 h-4"></i></button>
-            </div>
-          </div>
-
-        </div>
-
-        <!-- DICOM PS 3.15 Annex E PII Tag Audit Matrix -->
-        <div class="mt-4 pt-3 border-t border-panelBorder flex flex-col flex-1">
-          <div class="flex items-center justify-between mb-2">
-            <div class="flex items-center gap-1.5 text-xs font-bold text-white">
-              <i data-lucide="file-check-2" class="w-4 h-4 text-emerald-400"></i>
-              <span>DICOM PS 3.15 Annex E &bull; PII Sanitization Audit</span>
-            </div>
-            <span id="redactionNotice" class="text-[11px] font-medium text-emerald-400"></span>
-          </div>
-
-          <div class="border border-panelBorder rounded-lg overflow-hidden bg-canvas/40 max-h-48 overflow-y-auto">
-            <table class="w-full text-left text-xs">
-              <thead class="bg-panelElevated text-slate-400 sticky top-0 border-b border-panelBorder text-[11px]">
-                <tr>
-                  <th class="py-2 px-3">Tag Hex</th>
-                  <th class="py-2 px-3">Attribute</th>
-                  <th class="py-2 px-3">Pre-Ingestion (Raw PHI)</th>
-                  <th class="py-2 px-3">Post-Ingestion (Zero-Trust)</th>
-                  <th class="py-2 px-3 text-right">Audit</th>
-                </tr>
-              </thead>
-              <tbody id="piiTableBody" class="divide-y divide-panelBorder font-mono text-[11px]">
-                <tr>
-                  <td colspan="5" class="py-6 text-center text-slate-500 font-sans">
-                    Ingest a radiograph to populate the live 18 Safe Harbor de-identification audit table.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-        </div>
-
-      </div>
-
-    </section>
-
-    <!-- RIGHT COLUMN: Diagnostics & Cryptographic Security (col-span-3) -->
-    <section class="lg:col-span-3 flex flex-col gap-4">
-      
-      <!-- AI Predictions Panel -->
-      <div class="bg-panel border border-panelBorder rounded-xl p-4 shadow-xl">
-        <div class="flex items-center justify-between pb-3 border-b border-panelBorder mb-3">
-          <div class="flex items-center gap-2 text-sm font-semibold text-white">
-            <i data-lucide="activity" class="w-4 h-4 text-cyan-400"></i>
-            <span>Diagnostic Inference</span>
-          </div>
-          <span id="modelLatencyBadge" class="text-[11px] font-mono text-slate-400">-- ms</span>
-        </div>
-
-        <p class="text-[11px] text-slate-400 uppercase tracking-wider font-bold mb-2.5">
-          Multi-Label Pathology Probabilities
-        </p>
-
-        <div id="pathologyContainer" class="space-y-3">
-          <div class="py-8 text-center text-slate-500 text-xs font-medium">
-            Waiting for scan evaluation...
-          </div>
-        </div>
-      </div>
-
-      <!-- Zero-Trust Cryptographic Storage Inspector -->
-      <div class="bg-panel border border-panelBorder rounded-xl p-4 shadow-xl flex-1 flex flex-col justify-between">
-        <div>
-          <div class="flex items-center justify-between pb-3 border-b border-panelBorder mb-3">
-            <div class="flex items-center gap-2 text-sm font-semibold text-white">
-              <i data-lucide="lock" class="w-4 h-4 text-cyan-400"></i>
-              <span>AES-256-GCM Envelope</span>
-            </div>
-            <span class="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">FIPS 140-3</span>
-          </div>
-
-          <!-- Shannon Entropy Gauge -->
-          <div class="bg-canvas border border-panelBorder rounded-lg p-3 mb-2.5">
-            <div class="flex items-center justify-between text-[11px] text-slate-400 mb-1">
-              <span>Shannon Entropy (Randomness):</span>
-              <span id="cryptoEntropy" class="font-mono text-cyan-400 font-bold">-- / 8.00000</span>
-            </div>
-            <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
-              <div id="entropyBar" class="bg-gradient-to-r from-sky-500 to-cyan-400 h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
-            </div>
-            <div class="flex justify-between text-[10px] text-slate-500 mt-1">
-              <span>Plaintext: &lt; 5.0</span>
-              <span class="text-emerald-400 font-semibold">Target &ge; 7.99 (Passed)</span>
-            </div>
-          </div>
-
-          <!-- SHA-256 Digest Card -->
-          <div class="bg-canvas border border-panelBorder rounded-lg p-3 mb-2.5">
-            <div class="flex items-center justify-between text-[11px] text-slate-400 mb-1">
-              <span>Ciphertext SHA-256 Digest:</span>
-              <button onclick="copyHash()" class="text-cyan-400 hover:text-cyan-300 p-0.5" title="Copy SHA-256"><i data-lucide="copy" class="w-3.5 h-3.5"></i></button>
-            </div>
-            <p id="cryptoSha256" class="font-mono text-[10px] text-slate-300 break-all bg-obsidian/70 p-1.5 rounded border border-panelBorder/70">--</p>
-          </div>
-
-          <!-- Wire Hex Header (64 Bytes) -->
-          <div class="bg-canvas border border-panelBorder rounded-lg p-3">
-            <span class="text-[11px] text-slate-400 block mb-1">MEDENC01 Wire Header (64 Bytes):</span>
-            <div id="cryptoHex" class="font-mono text-[10px] text-slate-400 break-all leading-relaxed bg-obsidian/70 p-1.5 rounded border border-panelBorder/70">--</div>
-          </div>
-        </div>
-
-        <!-- India DPDP Act Section 12 Crypto-Shredder -->
-        <div class="mt-4 pt-3 border-t border-panelBorder">
-          <button id="shredBtn" onclick="confirmCryptoShred()" disabled class="w-full py-2.5 px-3 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 border border-rose-500/30 font-semibold text-xs transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 group">
-            <i data-lucide="flame" class="w-4 h-4 text-rose-400 group-hover:scale-110 transition-transform"></i>
-            <span>DPDP Act §12: Crypto-Shred Study</span>
+            <i id="drawerChevron" data-lucide="chevron-down" class="w-4 h-4 transition-transform duration-200"></i>
           </button>
-          <div id="shredResult" class="text-[11px] text-slate-400 text-center mt-2 font-mono"></div>
+
+          <div id="auditDrawer" class="hidden p-3 pt-0 border-t border-borderSubtle/60 space-y-3">
+            
+            <!-- Ciphertext Hash & 1-Click Copy -->
+            <div class="mt-2.5 p-2 rounded-lg bg-obsidian border border-borderSubtle flex items-center justify-between gap-2">
+              <div class="truncate text-[11px] font-mono text-slate-400">
+                <span class="text-slate-400">SHA-256: </span>
+                <span id="sha256Digest" class="text-slate-300">--</span>
+              </div>
+              <button onclick="copyDigest()" title="Copy SHA-256 Hash" class="p-1 rounded hover:bg-cardBg text-slate-400 hover:text-cyan-300 transition-colors">
+                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+
+            <!-- 18 Safe Harbor Stripped Tags Table -->
+            <div class="max-h-44 overflow-y-auto border border-borderSubtle rounded-lg bg-obsidian/40">
+              <table class="w-full text-left text-[11px] font-mono">
+                <thead class="bg-cardBg text-slate-400 sticky top-0 border-b border-borderSubtle text-[10px]">
+                  <tr>
+                    <th class="py-1.5 px-2.5">Tag</th>
+                    <th class="py-1.5 px-2.5">Attribute</th>
+                    <th class="py-1.5 px-2.5">Original (PHI)</th>
+                    <th class="py-1.5 px-2.5 text-right">Status</th>
+                  </tr>
+                </thead>
+                <tbody id="tagTableBody" class="divide-y divide-borderSubtle">
+                </tbody>
+              </table>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- SECTION 4: Action Footer (Download & Shred) -->
+        <div class="pt-2 flex flex-col sm:flex-row items-center gap-2.5">
+          <button id="downloadBtn" onclick="downloadDecryptedScan()" class="w-full flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-cyan-600 to-sky-600 hover:from-cyan-500 hover:to-sky-500 text-white font-semibold text-xs flex items-center justify-center gap-2 shadow-lg shadow-cyan-900/30 transition-all active:scale-[0.98]">
+            <i data-lucide="download" class="w-4 h-4"></i>
+            <span>Download Decrypted Scan (.dcm)</span>
+          </button>
+          
+          <button id="shredBtn" onclick="executeCryptoShred()" class="w-full sm:w-auto py-2.5 px-3 rounded-xl bg-surfaceWell hover:bg-rose-950/40 border border-borderSubtle hover:border-rose-500/40 text-slate-300 hover:text-rose-400 text-xs font-medium flex items-center justify-center gap-1.5 transition-all">
+            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+            <span>Crypto-Shred</span>
+          </button>
         </div>
 
       </div>
@@ -748,14 +666,10 @@ DASHBOARD_HTML_PAGE = """<!DOCTYPE html>
 
   </main>
 
-  <!-- Floating Toast Notification System (Replaces Alert Boxes) -->
-  <div id="toastContainer" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2.5 max-w-md w-full pointer-events-none"></div>
-
-  <!-- Client-side Logic & Modern Interaction -->
+  <!-- Client-Side Workstation Logic -->
   <script>
     let currentStudyData = null;
-    let currentActiveView = 'heatmap';
-    let currentZoomLevel = 1.0;
+    let isHeatmapActive = false;
 
     // Toast Notification System
     function showToast(title, message, type = 'info') {
@@ -763,40 +677,55 @@ DASHBOARD_HTML_PAGE = """<!DOCTYPE html>
       const toast = document.createElement('div');
       
       const typeStyles = {
-        success: 'border-emerald-500/40 bg-emerald-950/80 text-emerald-200',
-        error: 'border-rose-500/40 bg-rose-950/90 text-rose-200 shadow-rose-950/50',
-        info: 'border-sky-500/40 bg-sky-950/80 text-sky-200',
-        warning: 'border-amber-500/40 bg-amber-950/80 text-amber-200'
+        success: 'bg-cardBg border-emerald-500/50 text-emerald-300',
+        error: 'bg-cardBg border-rose-500/50 text-rose-300',
+        warning: 'bg-cardBg border-amber-500/50 text-amber-300',
+        info: 'bg-cardBg border-cyan-500/50 text-cyan-300'
       };
 
-      const iconNames = {
+      const iconName = {
         success: 'check-circle-2',
         error: 'alert-triangle',
-        info: 'info',
-        warning: 'alert-circle'
-      };
+        warning: 'alert-circle',
+        info: 'info'
+      }[type] || 'info';
 
-      toast.className = `pointer-events-auto p-4 rounded-xl border backdrop-blur-md shadow-2xl flex items-start gap-3 text-xs toast-enter ${typeStyles[type] || typeStyles.info}`;
+      toast.className = `toast-anim pointer-events-auto p-3.5 rounded-xl border shadow-xl flex items-start gap-3 text-xs ${typeStyles[type] || typeStyles.info}`;
       toast.innerHTML = `
-        <i data-lucide="${iconNames[type] || 'info'}" class="w-5 h-5 flex-shrink-0 mt-0.5"></i>
+        <i data-lucide="${iconName}" class="w-4 h-4 mt-0.5 flex-shrink-0"></i>
         <div class="flex-1">
-          <div class="font-bold text-white text-sm mb-0.5">${title}</div>
-          <div class="text-slate-300 leading-relaxed">${message}</div>
+          <p class="font-bold text-white">${title}</p>
+          <p class="text-slate-300 mt-0.5">${message}</p>
         </div>
-        <button onclick="this.parentElement.remove()" class="text-slate-400 hover:text-white p-1 -mr-1 -mt-1"><i data-lucide="x" class="w-4 h-4"></i></button>
+        <button onclick="this.parentElement.remove()" class="text-slate-400 hover:text-white p-0.5"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>
       `;
 
       container.appendChild(toast);
       lucide.createIcons({ root: toast });
-
-      setTimeout(() => toast.classList.add('toast-enter-active'), 10);
-      setTimeout(() => {
-        toast.classList.add('toast-exit');
-        setTimeout(() => toast.remove(), 250);
-      }, 5000);
+      setTimeout(() => { if (toast.parentElement) toast.remove(); }, 4000);
     }
 
-    // Dropzone setup
+    // Defensive API Client
+    async function safeApiPost(url, formData) {
+      try {
+        const res = await fetch(url, { method: 'POST', body: formData });
+        const rawText = await res.text();
+        let json;
+        try {
+          json = JSON.parse(rawText);
+        } catch {
+          throw new Error(rawText || `Server returned HTTP ${res.status}`);
+        }
+        if (!res.ok) {
+          throw new Error(json.detail || json.message || `HTTP ${res.status} Error`);
+        }
+        return json;
+      } catch (err) {
+        throw err;
+      }
+    }
+
+    // Drag and drop setup
     const dropzone = document.getElementById('dropzone');
     const fileInput = document.getElementById('fileInput');
 
@@ -814,143 +743,111 @@ DASHBOARD_HTML_PAGE = """<!DOCTYPE html>
     });
 
     function setLoader(show, text = 'Processing...') {
-      const loader = document.getElementById('loader');
+      document.getElementById('dropzoneContainer').classList.toggle('hidden', show);
+      document.getElementById('scanStage').classList.add('hidden');
       document.getElementById('loaderText').innerText = text;
-      loader.classList.toggle('hidden', !show);
-    }
-
-    // Defensive Safe Fetch Handler
-    async function safeApiPost(url, formData) {
-      try {
-        const res = await fetch(url, { method: 'POST', body: formData });
-        const rawText = await res.text();
-        let json;
-        try {
-          json = JSON.parse(rawText);
-        } catch {
-          throw new Error(rawText || `Server returned HTTP ${res.status}`);
-        }
-
-        if (!res.ok) {
-          throw new Error(json.detail || json.message || `HTTP ${res.status} Error`);
-        }
-        return json;
-      } catch (err) {
-        throw err;
-      }
+      document.getElementById('loader').classList.toggle('hidden', !show);
     }
 
     async function loadSample(sampleId) {
-      setLoader(true, 'Sanitizing, Encrypting & Diagnosing Patient Case...');
+      setLoader(true, 'Sanitizing, Encrypting & Diagnosing Case...');
       const formData = new FormData();
       formData.append('sample_id', sampleId);
       formData.append('pathology_heatmap', document.getElementById('pathologySelect').value || 'Pneumonia');
 
       try {
         const data = await safeApiPost('/api/v1/dashboard/analyze', formData);
-        renderDashboard(data);
-        showToast('Study Ingested Successfully', `De-identified and evaluated ${data.file_name} with pre-trained TorchXRayVision.`, 'success');
+        renderActiveDashboard(data);
+        showToast('Study Evaluated', `Processed ${data.file_name} with pre-trained TorchXRayVision.`, 'success');
       } catch (err) {
         showToast('Ingestion Error', err.message, 'error');
-      } finally {
-        setLoader(false);
+        resetToUpload();
       }
     }
 
     async function uploadFile(file) {
-      // Validate file extension
       const validExts = ['.dcm', '.png', '.jpg', '.jpeg'];
       const hasValidExt = validExts.some(ext => file.name.toLowerCase().endsWith(ext));
       if (!hasValidExt) {
-        showToast('Invalid File Type', 'Please upload a DICOM (.dcm) or standard radiograph scan (.png, .jpg).', 'warning');
+        showToast('Invalid File Type', 'Please upload a DICOM (.dcm) or standard scan (.png, .jpg).', 'warning');
         return;
       }
 
-      setLoader(true, `Uploading & Sanitizing ${file.name}...`);
+      setLoader(true, `De-identifying & Ingesting ${file.name}...`);
       const formData = new FormData();
       formData.append('file', file);
       formData.append('pathology_heatmap', document.getElementById('pathologySelect').value || 'Pneumonia');
 
       try {
         const data = await safeApiPost('/api/v1/dashboard/analyze', formData);
-        renderDashboard(data);
-        showToast('Study Uploaded & Encrypted', `Ingestion complete: Sealed with AES-256-GCM envelope (${data.security.shannon_entropy_bits_per_byte} bits/byte).`, 'success');
+        renderActiveDashboard(data);
+        showToast('Upload Successful', `Sealed with AES-256-GCM envelope (${data.security.shannon_entropy_bits_per_byte} bits/byte).`, 'success');
       } catch (err) {
         showToast('Upload Failure', err.message, 'error');
-      } finally {
-        setLoader(false);
+        resetToUpload();
       }
     }
 
-    function renderDashboard(data) {
+    function renderActiveDashboard(data) {
       currentStudyData = data;
-      resetZoom();
+      isHeatmapActive = false;
+      document.getElementById('heatmapToggle').checked = false;
+      document.getElementById('pathologySelectorContainer').classList.add('hidden');
+
+      // 1. Switch Left Card to Active Viewport
+      document.getElementById('loader').classList.add('hidden');
+      document.getElementById('dropzoneContainer').classList.add('hidden');
+      document.getElementById('scanStage').classList.remove('hidden');
+      document.getElementById('resetScanBtn').classList.remove('hidden');
+      document.getElementById('mainScanImg').src = data.images.redacted_image_url;
+
+      // 2. Switch Right Card to Active Content
+      document.getElementById('rightPlaceholder').classList.add('hidden');
+      document.getElementById('rightContent').classList.remove('hidden');
+      document.getElementById('scanFilename').innerText = data.file_name;
+
+      // 3. Render Top AI Finding
+      const preds = data.ai_diagnostics.predictions || [];
+      const top = preds[0] || { pathology: 'No finding', probability: 0, triage_urgency: 'ROUTINE' };
+      document.getElementById('topFindingName').innerText = top.pathology;
       
-      // Update Diagnostic Viewer
-      switchView(currentActiveView);
+      const pct = (top.probability * 100).toFixed(1);
+      document.getElementById('topConfidence').innerText = `${pct}%`;
+      document.getElementById('confidenceBar').style.width = `${pct}%`;
 
-      // Triage Alert Badge
-      const urgency = data.ai_diagnostics.overall_triage_urgency;
-      const triageBadge = document.getElementById('triageBadge');
-      const badgeStyles = {
-        'STAT_CRITICAL': 'bg-rose-500/10 text-rose-400 border-rose-500/40 shadow-rose-900/30',
-        'ELEVATED': 'bg-amber-500/10 text-amber-400 border-amber-500/40 shadow-amber-900/30',
-        'ROUTINE': 'bg-emerald-500/10 text-emerald-400 border-emerald-500/40'
-      };
-      triageBadge.innerHTML = `
-        <span class="px-3 py-1.5 text-xs font-bold rounded-lg border shadow flex items-center gap-1.5 ${badgeStyles[urgency] || badgeStyles.ROUTINE}">
-          <i data-lucide="${urgency === 'STAT_CRITICAL' ? 'alert-octagon' : (urgency === 'ELEVATED' ? 'alert-triangle' : 'check-circle-2')}" class="w-3.5 h-3.5"></i>
-          <span>${urgency} TRIAGE</span>
-        </span>
-      `;
+      // Urgency Triage Badge
+      const urgency = top.triage_urgency || 'ROUTINE';
+      const badge = document.getElementById('triageBadge');
+      if (urgency === 'STAT_CRITICAL') {
+        badge.className = 'text-[10px] font-bold px-2 py-0.5 rounded border bg-rose-500/10 text-rose-400 border-rose-500/30';
+        badge.innerText = 'STAT CRITICAL';
+      } else if (urgency === 'ELEVATED') {
+        badge.className = 'text-[10px] font-bold px-2 py-0.5 rounded border bg-amber-500/10 text-amber-400 border-amber-500/30';
+        badge.innerText = 'ELEVATED TRIAGE';
+      } else {
+        badge.className = 'text-[10px] font-bold px-2 py-0.5 rounded border bg-emerald-500/10 text-emerald-400 border-emerald-500/30';
+        badge.innerText = 'ROUTINE';
+      }
 
-      // Inference Latency
-      document.getElementById('modelLatencyBadge').innerText = `${data.ai_diagnostics.inference_latency_ms} ms &bull; CPU`;
+      // Secondary Screenings Line
+      const secondaries = preds.slice(1).map(p => `${p.pathology} ${(p.probability * 100).toFixed(0)}%`).join(' &bull; ');
+      document.getElementById('secondaryFindings').innerHTML = secondaries ? `Also screened: ${secondaries}` : '';
 
-      // Pathology Breakdown with Animated Bars
-      const pContainer = document.getElementById('pathologyContainer');
-      pContainer.innerHTML = '';
-      data.ai_diagnostics.predictions.forEach(p => {
-        const pct = (p.probability * 100).toFixed(1);
-        const isUrgent = p.probability >= 0.5;
-        pContainer.innerHTML += `
-          <div class="space-y-1">
-            <div class="flex justify-between items-center text-xs">
-              <span class="font-medium text-slate-200">${p.pathology}</span>
-              <span class="font-mono font-bold ${isUrgent ? 'text-amber-400' : 'text-slate-400'}">${pct}%</span>
-            </div>
-            <div class="w-full bg-canvas rounded-full h-2 border border-panelBorder overflow-hidden">
-              <div class="h-2 rounded-full transition-all duration-500 ${isUrgent ? 'bg-gradient-to-r from-amber-500 to-rose-500' : 'bg-gradient-to-r from-sky-500 to-cyan-400'}" style="width: ${pct}%"></div>
-            </div>
-          </div>
-        `;
-      });
+      // 4. Security Metrics
+      document.getElementById('entropyScore').innerText = `Entropy ${data.security.shannon_entropy_bits_per_byte} / 8.0`;
+      document.getElementById('sha256Digest').innerText = data.security.sha256_hash;
 
-      // Cryptographic Storage Inspector
-      const entropy = data.security.shannon_entropy_bits_per_byte;
-      document.getElementById('cryptoEntropy').innerText = `${entropy} / 8.00000`;
-      document.getElementById('entropyBar').style.width = `${(entropy / 8.0) * 100}%`;
-      document.getElementById('cryptoSha256').innerText = data.security.sha256_hash;
-      document.getElementById('cryptoHex').innerText = data.security.hex_preview_64b;
-
-      // Enable Shredder
-      const shredBtn = document.getElementById('shredBtn');
-      shredBtn.disabled = false;
-      document.getElementById('shredResult').innerText = `Sealed as: ${data.anonymous_study_instance_uid.substring(0, 24)}...`;
-
-      // Render PII Table
-      const piiBody = document.getElementById('piiTableBody');
-      piiBody.innerHTML = '';
-      data.deidentification.tag_diff_matrix.forEach(row => {
-        const isScrubbed = row.status === 'SANITIZED';
-        piiBody.innerHTML += `
-          <tr class="hover:bg-panelElevated/50 transition-colors">
-            <td class="py-2 px-3 text-slate-500">${row.tag_hex}</td>
-            <td class="py-2 px-3 font-semibold text-slate-300 font-sans">${row.tag_name}</td>
-            <td class="py-2 px-3 text-rose-400/90">${row.original_value}</td>
-            <td class="py-2 px-3 text-emerald-400 font-medium">${row.sanitized_value}</td>
-            <td class="py-2 px-3 text-right">
-              <span class="px-2 py-0.5 rounded text-[10px] font-bold ${isScrubbed ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-400'}">
+      // 5. Populate DICOM Stripped Tag Table
+      const tagTbody = document.getElementById('tagTableBody');
+      tagTbody.innerHTML = '';
+      (data.deidentification.tag_diff_matrix || []).forEach(row => {
+        tagTbody.innerHTML += `
+          <tr class="hover:bg-surfaceWell/50 transition-colors">
+            <td class="py-1 px-2.5 text-slate-500">${row.tag_hex}</td>
+            <td class="py-1 px-2.5 text-slate-300 font-sans">${row.tag_name}</td>
+            <td class="py-1 px-2.5 text-rose-400/80 truncate max-w-[120px]">${row.original_value}</td>
+            <td class="py-1 px-2.5 text-right font-sans">
+              <span class="px-1.5 py-0.5 rounded text-[9px] font-bold ${row.status === 'SANITIZED' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'text-slate-500'}">
                 ${row.status}
               </span>
             </td>
@@ -958,106 +855,106 @@ DASHBOARD_HTML_PAGE = """<!DOCTYPE html>
         `;
       });
 
-      const notice = document.getElementById('redactionNotice');
-      notice.innerText = data.deidentification.burned_in_text_redacted ? '✓ Burned-in text detected & redacted' : '✓ No burned-in PHI found';
+      // Enable Shred and Download buttons
+      const shredBtn = document.getElementById('shredBtn');
+      shredBtn.disabled = false;
+      shredBtn.innerHTML = `<i data-lucide="trash-2" class="w-3.5 h-3.5"></i><span>Crypto-Shred</span>`;
 
       lucide.createIcons();
     }
 
-    function switchView(viewName) {
-      currentActiveView = viewName;
-      document.getElementById('tabRaw').className = viewName === 'raw' ? 'py-1.5 px-3 rounded-lg text-xs font-bold text-white bg-panelElevated shadow border border-panelBorder' : 'py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-400 hover:text-white';
-      document.getElementById('tabRedacted').className = viewName === 'redacted' ? 'py-1.5 px-3 rounded-lg text-xs font-bold text-white bg-panelElevated shadow border border-panelBorder' : 'py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-400 hover:text-white';
-      document.getElementById('tabHeatmap').className = viewName === 'heatmap' ? 'py-1.5 px-3 rounded-lg text-xs font-bold text-cyan-400 bg-panelElevated shadow border border-panelBorder flex items-center justify-center gap-1.5' : 'py-1.5 px-3 rounded-lg text-xs font-semibold text-slate-400 hover:text-white flex items-center justify-center gap-1.5';
+    function resetToUpload() {
+      currentStudyData = null;
+      document.getElementById('fileInput').value = '';
+      document.getElementById('dropzoneContainer').classList.remove('hidden');
+      document.getElementById('scanStage').classList.add('hidden');
+      document.getElementById('resetScanBtn').classList.add('hidden');
+      document.getElementById('loader').classList.add('hidden');
+      document.getElementById('rightContent').classList.add('hidden');
+      document.getElementById('rightPlaceholder').classList.remove('hidden');
+      document.getElementById('scanFilename').innerText = 'Awaiting study';
+    }
 
-      const img = document.getElementById('mainDisplayImg');
+    function onToggleHeatmap(enabled) {
       if (!currentStudyData) return;
+      isHeatmapActive = enabled;
+      const img = document.getElementById('mainScanImg');
+      const selector = document.getElementById('pathologySelectorContainer');
 
-      if (viewName === 'raw') {
-        img.src = currentStudyData.images.raw_image_url;
-      } else if (viewName === 'redacted') {
-        img.src = currentStudyData.images.redacted_image_url;
-      } else if (viewName === 'heatmap') {
+      if (enabled) {
         img.src = currentStudyData.images.gradcam_heatmap_url;
+        selector.classList.remove('hidden');
+      } else {
+        img.src = currentStudyData.images.redacted_image_url;
+        selector.classList.add('hidden');
       }
     }
 
-    async function changeHeatmapPathology() {
+    async function changeHeatmapTarget() {
       if (!currentStudyData) return;
-      const selected = document.getElementById('pathologySelect').value;
-      setLoader(true, `Computing Grad-CAM for ${selected}...`);
+      const target = document.getElementById('pathologySelect').value;
       const formData = new FormData();
       formData.append('sample_id', currentStudyData.file_name.replace('.dcm', '').replace('.png', ''));
-      formData.append('pathology_heatmap', selected);
+      formData.append('pathology_heatmap', target);
 
       try {
         const data = await safeApiPost('/api/v1/dashboard/analyze', formData);
         currentStudyData.images.gradcam_heatmap_url = data.images.gradcam_heatmap_url;
-        if (currentActiveView === 'heatmap') {
-          document.getElementById('mainDisplayImg').src = data.images.gradcam_heatmap_url;
+        if (isHeatmapActive) {
+          document.getElementById('mainScanImg').src = data.images.gradcam_heatmap_url;
         }
-        showToast('Grad-CAM Updated', `Heatmap recalculated for ${selected}.`, 'info');
+        showToast('Grad-CAM Updated', `Heatmap recalculated for ${target}.`, 'info');
       } catch (err) {
         showToast('Heatmap Error', err.message, 'error');
-      } finally {
-        setLoader(false);
       }
     }
 
-    function adjustHeatmapOpacity(val) {
-      document.getElementById('opacityLabel').innerText = `${val}%`;
-      const img = document.getElementById('mainDisplayImg');
-      if (currentActiveView === 'heatmap') {
-        img.style.opacity = (val / 100).toString();
-      } else {
-        img.style.opacity = '1';
-      }
+    function toggleAuditDrawer() {
+      const drawer = document.getElementById('auditDrawer');
+      const chevron = document.getElementById('drawerChevron');
+      const isHidden = drawer.classList.contains('hidden');
+      drawer.classList.toggle('hidden', !isHidden);
+      chevron.style.transform = isHidden ? 'rotate(180deg)' : 'rotate(0deg)';
     }
 
-    function zoomImage(factor) {
-      currentZoomLevel = Math.max(0.5, Math.min(3.0, currentZoomLevel * factor));
-      document.getElementById('mainDisplayImg').style.transform = `scale(${currentZoomLevel})`;
-    }
-
-    function resetZoom() {
-      currentZoomLevel = 1.0;
-      const img = document.getElementById('mainDisplayImg');
-      img.style.transform = 'scale(1)';
-      img.style.opacity = '1';
-    }
-
-    function copyHash() {
+    function copyDigest() {
       if (!currentStudyData) return;
       navigator.clipboard.writeText(currentStudyData.security.sha256_hash);
-      showToast('Copied to Clipboard', 'SHA-256 ciphertext hash copied.', 'info');
+      showToast('Copied', 'SHA-256 ciphertext hash copied to clipboard.', 'info');
     }
 
-    async function confirmCryptoShred() {
+    function downloadDecryptedScan() {
       if (!currentStudyData) return;
-      
       const uid = currentStudyData.anonymous_study_instance_uid;
-      setLoader(true, 'Executing India DPDP Section 12 Crypto-Shredding...');
+      // Trigger direct download from the dedicated backend endpoint
+      window.location.href = `/api/v1/dashboard/download/${uid}`;
+      showToast('Downloading Scan', 'Decrypted sanitized study is downloading.', 'info');
+    }
+
+    async function executeCryptoShred() {
+      if (!currentStudyData) return;
+      const uid = currentStudyData.anonymous_study_instance_uid;
+      const shredBtn = document.getElementById('shredBtn');
 
       try {
         const res = await fetch(`/api/v1/dashboard/shred/${uid}`, { method: 'POST' });
         const rawText = await res.text();
         let data;
         try { data = JSON.parse(rawText); } catch { throw new Error(rawText || `HTTP ${res.status}`); }
+
         if (res.ok) {
-          document.getElementById('shredResult').innerHTML = `<span class="text-rose-400 font-bold">💥 CRYPTO-SHREDDED (Mathematical Erasure Confirmed)</span>`;
-          document.getElementById('shredBtn').disabled = true;
-          showToast('Crypto-Shredding Verified', 'Study KEK overwritten with zeroes. Ciphertext is permanently unrecoverable.', 'success');
+          shredBtn.disabled = true;
+          shredBtn.innerHTML = `<span class="text-rose-400 font-bold">&check; Shredded</span>`;
+          showToast('Crypto-Shredding Verified', 'Study KEK destroyed. Ciphertext is mathematically irreversible.', 'success');
         } else {
-          showToast('Shred Failure', data.detail || data.message || 'Failed to shred study', 'error');
+          showToast('Shred Failure', data.detail || 'Failed to shred study', 'error');
         }
       } catch (err) {
         showToast('Network Error', err.message, 'error');
-      } finally {
-        setLoader(false);
       }
     }
 
-    // Initialize Icons
+    // Initialize Lucide icons on DOM ready
     lucide.createIcons();
   </script>
 </body>
