@@ -110,3 +110,4 @@ def clean_pixel_annotations(
     else:
         ds.BurnedInAnnotation = "NO"
         return ds, False
+

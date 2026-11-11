@@ -21,3 +21,4 @@ def calculate_shannon_entropy(data: bytes) -> float:
         entropy -= prob * math.log2(prob)
         
     return entropy
+

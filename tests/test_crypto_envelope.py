@@ -90,3 +90,4 @@ def test_encrypted_store_persistence(tmp_path):
     assert store.delete(study_uid) is True
     assert not os.path.exists(saved_path)
     assert store.load(study_uid) is None
+

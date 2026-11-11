@@ -37,3 +37,4 @@ class AuditLoggingMiddleware(BaseHTTPMiddleware):
             }
         )
         return response
+

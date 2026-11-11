@@ -99,7 +99,8 @@ async def run_inference(
     except PermissionError as pe:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(pe))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        audit_logger.error(f"Internal inference failure: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error during diagnostic inference.")
 
 @router.get("/heatmaps/{study_uid}/{pathology}")
 async def get_heatmap(

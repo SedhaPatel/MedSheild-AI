@@ -102,3 +102,4 @@ def test_inference_engine_end_to_end():
         assert "triage_urgency" in pred
         assert pred["triage_urgency"] in ["STAT_CRITICAL", "ELEVATED", "ROUTINE"]
         assert "epistemic_uncertainty" in pred
+

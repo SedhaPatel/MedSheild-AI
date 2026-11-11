@@ -52,3 +52,4 @@ def build_thoracic_model(
         state_dict = torch.load(checkpoint_path, map_location="cpu")
         model.load_state_dict(state_dict)
     return model
+

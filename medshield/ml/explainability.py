@@ -1,3 +1,4 @@
+import threading
 from typing import Optional, Tuple
 import numpy as np
 import torch
@@ -10,10 +11,12 @@ class GradCAM:
     Gradient-weighted Class Activation Mapping (Grad-CAM) for deep convolutional networks.
     Computes visual saliency heatmaps highlighting the anatomical regions influencing
     a specific pathology prediction.
+    Thread-safe execution via reentrant lock.
     """
     def __init__(self, model: nn.Module, target_layer_name: Optional[str] = None):
         self.model = model
         self.model.eval()
+        self._lock = threading.Lock()
         
         # Locate target layer
         if hasattr(model, "get_last_conv_layer"):
@@ -41,40 +44,42 @@ class GradCAM:
     def generate_heatmap(self, input_tensor: torch.Tensor, class_idx: int) -> np.ndarray:
         """
         Generates a 2D numpy heatmap normalized in [0.0, 1.0] for the given class index.
+        Protected by lock to prevent hook collision in concurrent requests.
         """
-        self.model.zero_grad()
-        # Enable gradients for the input and forward pass even during eval
-        input_tensor = input_tensor.clone().detach().requires_grad_(True)
-        
-        output = self.model(input_tensor)
-        score = output[0, class_idx]
-        score.backward(retain_graph=True)
-        
-        if self.gradients is None or self.activations is None:
-            # Fallback to uniform heatmap if hooks failed
-            return np.zeros((input_tensor.shape[2], input_tensor.shape[3]), dtype=np.float32)
+        with self._lock:
+            self.model.zero_grad()
+            # Enable gradients for the input and forward pass even during eval
+            input_tensor = input_tensor.clone().detach().requires_grad_(True)
             
-        # Global Average Pooling of gradients across spatial dimensions
-        weights = torch.mean(self.gradients, dim=(2, 3), keepdim=True)
-        
-        # Weighted combination of feature maps
-        cam = torch.sum(weights * self.activations, dim=1, keepdim=True)
-        cam = F.relu(cam)
-        
-        # Interpolate to match input spatial dimensions
-        h, w = input_tensor.shape[2], input_tensor.shape[3]
-        cam = F.interpolate(cam, size=(h, w), mode="bilinear", align_corners=False)
-        
-        cam_arr = cam.squeeze().cpu().detach().numpy()
-        
-        # Min-max normalization to [0.0, 1.0]
-        cam_min, cam_max = cam_arr.min(), cam_arr.max()
-        if cam_max > cam_min:
-            cam_arr = (cam_arr - cam_min) / (cam_max - cam_min)
-        else:
-            cam_arr = np.zeros_like(cam_arr)
+            output = self.model(input_tensor)
+            score = output[0, class_idx]
+            score.backward(retain_graph=True)
             
-        return cam_arr.astype(np.float32)
+            if self.gradients is None or self.activations is None:
+                # Fallback to uniform heatmap if hooks failed
+                return np.zeros((input_tensor.shape[2], input_tensor.shape[3]), dtype=np.float32)
+                
+            # Global Average Pooling of gradients across spatial dimensions
+            weights = torch.mean(self.gradients, dim=(2, 3), keepdim=True)
+            
+            # Weighted combination of feature maps
+            cam = torch.sum(weights * self.activations, dim=1, keepdim=True)
+            cam = F.relu(cam)
+            
+            # Interpolate to match input spatial dimensions
+            h, w = input_tensor.shape[2], input_tensor.shape[3]
+            cam = F.interpolate(cam, size=(h, w), mode="bilinear", align_corners=False)
+            
+            cam_arr = cam.squeeze().cpu().detach().numpy()
+            
+            # Min-max normalization to [0.0, 1.0]
+            cam_min, cam_max = cam_arr.min(), cam_arr.max()
+            if cam_max > cam_min:
+                cam_arr = (cam_arr - cam_min) / (cam_max - cam_min)
+            else:
+                cam_arr = np.zeros_like(cam_arr)
+                
+            return cam_arr.astype(np.float32)
 
 def overlay_heatmap(
     heatmap: np.ndarray,
@@ -100,3 +105,4 @@ def overlay_heatmap(
     heatmap_pil = Image.fromarray(colored_heatmap)
     blended = Image.blend(original_img.convert("RGB"), heatmap_pil, alpha=alpha)
     return blended
+

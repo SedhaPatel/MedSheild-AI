@@ -20,3 +20,4 @@ def generate_pseudonymized_uid(original_uid: str, secret_salt: bytes) -> str:
     # 2.25. + digits (length of prefix is 5, max total length is 64 -> digits <= 59)
     anon_uid = f"2.25.{int_str[:58]}"
     return anon_uid
+

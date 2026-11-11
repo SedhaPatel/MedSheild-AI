@@ -35,3 +35,4 @@ class MTLSAuthMiddleware(BaseHTTPMiddleware):
                 )
 
         return await call_next(request)
+

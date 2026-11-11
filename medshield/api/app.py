@@ -50,3 +50,4 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     return app
 
 app = create_app()
+

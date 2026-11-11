@@ -42,3 +42,4 @@ def configure_logging(log_level: str = "INFO") -> None:
 
 def get_audit_logger(name: str = "medshield.audit") -> logging.Logger:
     return logging.getLogger(name)
+

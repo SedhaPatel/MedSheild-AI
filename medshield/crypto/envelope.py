@@ -132,3 +132,4 @@ def decrypt_envelope(container: bytes, kms: KMSProvider) -> bytes:
     
     plaintext = aesgcm.decrypt(header.iv, ciphertext_with_tag, associated_data=aad)
     return plaintext
+

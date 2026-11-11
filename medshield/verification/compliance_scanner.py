@@ -94,3 +94,4 @@ class ComplianceScanner:
             violations=violations,
             inspected_tags_count=count_holder[0]
         )
+

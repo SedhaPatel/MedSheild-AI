@@ -57,6 +57,9 @@ def create_sample_dicom() -> Dataset:
     seq_item.ReasonForTheRequestedProcedure = "Persistent cough and dyspnea"
     ds.RequestAttributesSequence = Sequence([seq_item])
     
+    # Vendor-Specific Private Tag (Group 0x0029 is odd / private)
+    ds.add_new((0x0029, 0x1010), "LO", "Private Technician Note With PHI: John Doe Clinic")
+    
     return ds
 
 def test_uid_hasher_format_and_determinism():
@@ -119,6 +122,9 @@ def test_metadata_anonymizer_removes_hipaa_safe_harbor():
     assert len(anonymized.RequestAttributesSequence) == 1
     assert "PatientName" not in anonymized.RequestAttributesSequence[0]
     
+    # Verify Vendor-Specific Private Tag (0x0029, 0x1010) was purged
+    assert (0x0029, 0x1010) not in anonymized
+    
     # Verify Clinical Tags Preserved
     assert anonymized.Modality == "DX"
     assert anonymized.Rows == 2048
@@ -135,3 +141,4 @@ def test_metadata_anonymizer_removes_hipaa_safe_harbor():
     # Verify Audit Tags
     assert anonymized.PatientIdentityRemoved == "YES"
     assert "PS 3.15" in anonymized.DeidentificationMethod
+

@@ -86,3 +86,4 @@ class InferenceEngine:
         heatmap_2d = self.gradcam.generate_heatmap(input_tensor, class_idx=class_idx)
         blended_img = overlay_heatmap(heatmap_2d, pil_img, alpha=0.45)
         return blended_img
+

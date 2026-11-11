@@ -81,3 +81,4 @@ def test_clean_pixel_annotations_clean_image():
     assert cleaned_ds.BurnedInAnnotation == "NO"
     arr = extract_pixel_array(cleaned_ds)
     assert arr[100, 100] == 1500
+

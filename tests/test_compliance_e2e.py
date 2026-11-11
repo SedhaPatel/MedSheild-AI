@@ -147,3 +147,4 @@ def test_crypto_shredding_dpdp_right_to_erasure(tmp_path):
     # Verification: Decryption is now mathematically impossible
     with pytest.raises(PermissionError):
         process_study_inference(anon_uid, settings, kms=kms, store=store)
+

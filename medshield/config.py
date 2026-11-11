@@ -42,6 +42,13 @@ class Settings(BaseModel):
         ]
     )
 
+    def model_post_init(self, __context) -> None:
+        super().model_post_init(__context)
+        # Defense-in-depth: enforce non-default salt in production
+        if self.environment.lower() == "production":
+            if self.secret_pepper == b"MedShieldDefaultMasterSalt2026-StrictSec!":
+                raise ValueError("MEDSHIELD_SECRET_PEPPER must be explicitly set to a unique secret in production!")
+
 @lru_cache()
 def get_settings() -> Settings:
     return Settings()

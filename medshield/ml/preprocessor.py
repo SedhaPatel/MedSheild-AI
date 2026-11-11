@@ -43,3 +43,4 @@ class DICOMPreprocessor:
         # 4. Convert to normalized PyTorch tensor (1, 3, H, W)
         tensor = self.transform(pil_img).unsqueeze(0)
         return tensor, pil_img_resized
+

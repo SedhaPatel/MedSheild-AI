@@ -123,4 +123,5 @@ async def upload_study(
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
+        audit_logger.error(f"Internal ingestion failure: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error during study ingestion and encryption.")

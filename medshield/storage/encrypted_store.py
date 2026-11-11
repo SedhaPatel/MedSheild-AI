@@ -44,3 +44,4 @@ class EncryptedStore:
 
     def exists(self, study_uid: str) -> bool:
         return os.path.exists(self._get_path(study_uid))
+

@@ -53,9 +53,14 @@ PS315_TAGS_TO_ZERO = [
 ]
 
 def _sanitize_dataset_recursively(dataset: Dataset, secret_salt: bytes) -> None:
-    """Purges PHI from elements and any nested sequences."""
+    """Purges PHI from elements, vendor-specific private tags, and nested sequences."""
     for elem in list(dataset):
-        # Recursively process sequences
+        # 1. Purge vendor-specific private tags (odd group numbers per DICOM Part 5)
+        if elem.tag.is_private or (elem.tag.group % 2 == 1):
+            del dataset[elem.tag]
+            continue
+            
+        # 2. Recursively process sequences
         if elem.VR == "SQ" and isinstance(elem.value, Sequence):
             for item in elem.value:
                 if isinstance(item, Dataset):
@@ -112,3 +117,4 @@ def anonymize_dicom_metadata(
     ds.DeidentificationMethod = "DICOM PS 3.15 Annex E / MedShield Salted HMAC"
     
     return ds
+
