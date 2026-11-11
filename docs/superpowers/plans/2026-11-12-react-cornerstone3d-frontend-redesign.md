@@ -272,3 +272,4 @@ Follow Tasks 1–8 below when executing the plan (`docs/superpowers/plans/2026-1
   - Run `npm --prefix frontend run build` (confirm `exit code 0`).
   - Run `tests/verify_frontend_e2e.py` (confirm all assertions pass after final edit).
   - Commit final verified changes locally (**DO NOT run `git push`**).
+

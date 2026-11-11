@@ -1,4 +1,5 @@
 import base64
+from datetime import datetime, timezone
 import hashlib
 import io
 import os
@@ -27,6 +28,8 @@ router = APIRouter(tags=["Clinical Dashboard"])
 _dashboard_kms = LocalKMSProvider()
 _dashboard_store: Dict[str, EncryptedStore] = {}
 _dashboard_engine = InferenceEngine()
+_dashboard_worklist: Dict[str, Dict[str, Any]] = {}
+_dashboard_session_cache: Dict[str, Dict[str, Any]] = {}
 
 TRACKED_PII_TAGS = [
     ("PatientName", "Patient Full Name", "(0010,0010)"),
@@ -150,6 +153,7 @@ def list_dashboard_samples():
 def analyze_dashboard_study(
     file: Optional[UploadFile] = File(None),
     sample_id: Optional[str] = Form(None),
+    study_uid: Optional[str] = Form(None),
     pathology_heatmap: str = Form("Pneumonia"),
     settings: Settings = Depends(get_settings)
 ):
@@ -158,99 +162,155 @@ def analyze_dashboard_study(
     Parses study -> Extracts PII -> Sanitizes DICOM PS 3.15 -> Inpaints Pixel PHI ->
     Encrypts via AES-256-GCM Envelope -> Analyzes Shannon Entropy -> Computes AI Diagnosis ->
     Generates Grad-CAM Heatmap -> Returns side-by-side verification payload.
+    Also supports re-analyzing / changing Grad-CAM pathology on an already-stored study_uid.
     """
-    raw_bytes: bytes = b""
-    original_filename = "upload.dcm"
-    
-    if sample_id:
-        sample_path = os.path.join("test_samples", f"{sample_id}.dcm")
-        if not os.path.exists(sample_path):
-            sample_path = os.path.join("test_samples", f"{sample_id}.png")
-        if not os.path.exists(sample_path):
-            raise HTTPException(status_code=404, detail=f"Sample '{sample_id}' not found on server")
-        with open(sample_path, "rb") as f:
-            raw_bytes = f.read()
-        original_filename = os.path.basename(sample_path)
-    elif file:
-        raw_bytes = file.file.read()
-        original_filename = file.filename or "uploaded_scan"
-    else:
-        raise HTTPException(status_code=400, detail="Please select a pre-packaged case or upload a file.")
-
-    if not raw_bytes or len(raw_bytes) < 32:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty or corrupted (size < 32 bytes).")
-
-    # Step 1: Parse or construct DICOM
-    is_png = original_filename.lower().endswith((".png", ".jpg", ".jpeg"))
-    try:
-        if is_png:
-            raw_ds = _png_bytes_to_dicom(raw_bytes, patient_name="DOE^SUSPECT_CLINICAL")
-        else:
-            raw_ds = pydicom.dcmread(io.BytesIO(raw_bytes), force=True)
-            if not hasattr(raw_ds, "file_meta") or raw_ds.file_meta is None:
-                raw_ds.file_meta = FileMetaDataset()
-                raw_ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
-                raw_ds.file_meta.MediaStorageSOPClassUID = getattr(raw_ds, "SOPClassUID", "1.2.840.10008.5.1.4.1.1.1")
-                raw_ds.file_meta.MediaStorageSOPInstanceUID = getattr(raw_ds, "SOPInstanceUID", generate_uid())
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid DICOM/radiograph payload: {str(e)}")
-
-    # Capture original image data URL before redaction
-    raw_image_data_url = _dataset_to_base64_png(raw_ds)
-
-    # Step 2: Extract Pre-Sanitization PII Tags
-    pre_pii_tags: Dict[str, str] = {}
-    for tag_name, label, tag_hex in TRACKED_PII_TAGS:
-        val = getattr(raw_ds, tag_name, None)
-        pre_pii_tags[tag_name] = str(val) if val is not None else "(empty)"
-
-    # Step 3: Execute DICOM PS 3.15 Annex E De-Identification & Pixel Cleaning
-    anon_ds = anonymize_dicom_metadata(raw_ds, secret_salt=settings.secret_pepper)
-    cleaned_ds, was_redacted = clean_pixel_annotations(anon_ds)
-    anon_study_uid = str(cleaned_ds.StudyInstanceUID)
-
-    # Capture post-sanitization image data URL
-    redacted_image_data_url = _dataset_to_base64_png(cleaned_ds)
-
-    # Extract Post-Sanitization Tags for Side-by-Side Comparison
-    post_pii_tags: Dict[str, str] = {}
-    for tag_name, label, tag_hex in TRACKED_PII_TAGS:
-        val = getattr(cleaned_ds, tag_name, None)
-        post_pii_tags[tag_name] = str(val) if val is not None else "[SCRUBBED / DELETED]"
-
-    # Serialize Sanitized DICOM
-    bio = io.BytesIO()
-    pydicom.dcmwrite(bio, cleaned_ds)
-    sanitized_dicom_bytes = bio.getvalue()
-
-    # Step 4: AES-256-GCM Envelope Encryption with Study-Level Isolated KEK
     store = _dashboard_store.get(settings.storage_path) or EncryptedStore(storage_dir=settings.storage_path)
     _dashboard_store[settings.storage_path] = store
-    
-    study_kek_id = f"{settings.kms_master_key_id}:{anon_study_uid}"
-    plaintext_dek, ciphertext_dek = _dashboard_kms.generate_data_key(study_kek_id)
-    encrypted_container = encrypt_envelope(
-        payload=sanitized_dicom_bytes,
-        plaintext_dek=plaintext_dek,
-        kek_id=study_kek_id,
-        ciphertext_dek=ciphertext_dek
-    )
-    
-    saved_path = store.save(anon_study_uid, encrypted_container)
-    
-    # Calculate Security Metrics
-    shannon_entropy = calculate_shannon_entropy(encrypted_container[8:])
-    sha256_hash = hashlib.sha256(encrypted_container).hexdigest()
-    hex_preview = encrypted_container[:64].hex()
-    formatted_hex = " ".join([hex_preview[i:i+2] for i in range(0, len(hex_preview), 2)])
 
-    # Step 5: In-Memory Deep Learning Diagnostic Inference
-    decrypted_bytes = decrypt_envelope(encrypted_container, _dashboard_kms)
-    inference_ds = pydicom.dcmread(io.BytesIO(decrypted_bytes), force=True)
-    
+    if study_uid and not sample_id and not file:
+        if not store.exists(study_uid):
+            raise HTTPException(status_code=404, detail=f"Study '{study_uid}' not found in encrypted storage.")
+        encrypted_container = store.load(study_uid)
+        try:
+            decrypted_bytes = decrypt_envelope(encrypted_container, _dashboard_kms)
+        except Exception as e:
+            raise HTTPException(
+                status_code=410,
+                detail=f"Study key revoked via DPDP Crypto-Shredding or decryption failed: {str(e)}"
+            )
+        inference_ds = pydicom.dcmread(io.BytesIO(decrypted_bytes), force=True)
+        anon_study_uid = study_uid
+        study_kek_id = f"{settings.kms_master_key_id}:{anon_study_uid}"
+        saved_path = os.path.join(settings.storage_path, f"{anon_study_uid}.enc")
+
+        cached = _dashboard_session_cache.get(study_uid, {})
+        original_filename = cached.get("file_name", f"sanitized_{study_uid[-12:]}.dcm")
+        pre_pii_tags = cached.get("pre_pii_tags", {tag: "(not in cache)" for tag, _, _ in TRACKED_PII_TAGS})
+        post_pii_tags = cached.get(
+            "post_pii_tags",
+            {
+                tag: str(getattr(inference_ds, tag, None)) if getattr(inference_ds, tag, None) is not None else "[SCRUBBED / DELETED]"
+                for tag, _, _ in TRACKED_PII_TAGS
+            },
+        )
+        was_redacted = cached.get("was_redacted", False)
+        redacted_image_data_url = cached.get("redacted_image_data_url") or _dataset_to_base64_png(inference_ds)
+        raw_image_data_url = cached.get("raw_image_data_url") or redacted_image_data_url
+
+        shannon_entropy = calculate_shannon_entropy(encrypted_container[8:])
+        sha256_hash = hashlib.sha256(encrypted_container).hexdigest()
+        hex_preview = encrypted_container[:64].hex()
+        formatted_hex = " ".join([hex_preview[i:i+2] for i in range(0, len(hex_preview), 2)])
+    else:
+        raw_bytes: bytes = b""
+        original_filename = "upload.dcm"
+
+        if sample_id:
+            sample_path = os.path.join("test_samples", f"{sample_id}.dcm")
+            if not os.path.exists(sample_path):
+                sample_path = os.path.join("test_samples", f"{sample_id}.png")
+            if not os.path.exists(sample_path):
+                raise HTTPException(status_code=404, detail=f"Sample '{sample_id}' not found on server")
+            with open(sample_path, "rb") as f:
+                raw_bytes = f.read()
+            original_filename = os.path.basename(sample_path)
+        elif file:
+            raw_bytes = file.file.read()
+            original_filename = file.filename or "uploaded_scan"
+        else:
+            raise HTTPException(status_code=400, detail="Please select a pre-packaged case or upload a file.")
+
+        if not raw_bytes or len(raw_bytes) < 32:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty or corrupted (size < 32 bytes).")
+
+        # Step 1: Parse or construct DICOM
+        is_png = original_filename.lower().endswith((".png", ".jpg", ".jpeg"))
+        try:
+            if is_png:
+                raw_ds = _png_bytes_to_dicom(raw_bytes, patient_name="DOE^SUSPECT_CLINICAL")
+            else:
+                raw_ds = pydicom.dcmread(io.BytesIO(raw_bytes), force=True)
+                if not hasattr(raw_ds, "file_meta") or raw_ds.file_meta is None:
+                    raw_ds.file_meta = FileMetaDataset()
+                if not getattr(raw_ds.file_meta, "TransferSyntaxUID", None):
+                    raw_ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+                if not getattr(raw_ds.file_meta, "MediaStorageSOPClassUID", None):
+                    raw_ds.file_meta.MediaStorageSOPClassUID = getattr(raw_ds, "SOPClassUID", "1.2.840.10008.5.1.4.1.1.1")
+                if not getattr(raw_ds.file_meta, "MediaStorageSOPInstanceUID", None):
+                    raw_ds.file_meta.MediaStorageSOPInstanceUID = getattr(raw_ds, "SOPInstanceUID", generate_uid())
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid DICOM/radiograph payload: {str(e)}")
+
+        # Capture original image data URL before redaction
+        raw_image_data_url = _dataset_to_base64_png(raw_ds)
+
+        # Step 2: Extract Pre-Sanitization PII Tags
+        pre_pii_tags = {}
+        for tag_name, label, tag_hex in TRACKED_PII_TAGS:
+            val = getattr(raw_ds, tag_name, None)
+            pre_pii_tags[tag_name] = str(val) if val is not None else "(empty)"
+
+        # Step 3: Execute DICOM PS 3.15 Annex E De-Identification & Pixel Cleaning
+        anon_ds = anonymize_dicom_metadata(raw_ds, secret_salt=settings.secret_pepper)
+        cleaned_ds, was_redacted = clean_pixel_annotations(anon_ds)
+        anon_study_uid = str(cleaned_ds.StudyInstanceUID)
+
+        # Guarantee valid DICOM Part 10 header for Cornerstone3D wadouri streaming
+        cleaned_ds.preamble = b"\x00" * 128
+        if not hasattr(cleaned_ds, "file_meta") or cleaned_ds.file_meta is None:
+            cleaned_ds.file_meta = FileMetaDataset()
+        cleaned_ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+        cleaned_ds.file_meta.MediaStorageSOPClassUID = getattr(cleaned_ds, "SOPClassUID", "1.2.840.10008.5.1.4.1.1.1")
+        cleaned_ds.file_meta.MediaStorageSOPInstanceUID = getattr(cleaned_ds, "SOPInstanceUID", generate_uid())
+
+        # Capture post-sanitization image data URL
+        redacted_image_data_url = _dataset_to_base64_png(cleaned_ds)
+
+        # Extract Post-Sanitization Tags for Side-by-Side Comparison
+        post_pii_tags = {}
+        for tag_name, label, tag_hex in TRACKED_PII_TAGS:
+            val = getattr(cleaned_ds, tag_name, None)
+            post_pii_tags[tag_name] = str(val) if val is not None else "[SCRUBBED / DELETED]"
+
+        # Serialize Sanitized DICOM Part 10 container
+        bio = io.BytesIO()
+        pydicom.dcmwrite(bio, cleaned_ds, enforce_file_format=True)
+        sanitized_dicom_bytes = bio.getvalue()
+
+        # Step 4: AES-256-GCM Envelope Encryption with Study-Level Isolated KEK
+        study_kek_id = f"{settings.kms_master_key_id}:{anon_study_uid}"
+        plaintext_dek, ciphertext_dek = _dashboard_kms.generate_data_key(study_kek_id)
+        encrypted_container = encrypt_envelope(
+            payload=sanitized_dicom_bytes,
+            plaintext_dek=plaintext_dek,
+            kek_id=study_kek_id,
+            ciphertext_dek=ciphertext_dek
+        )
+
+        saved_path = store.save(anon_study_uid, encrypted_container)
+
+        # Calculate Security Metrics
+        shannon_entropy = calculate_shannon_entropy(encrypted_container[8:])
+        sha256_hash = hashlib.sha256(encrypted_container).hexdigest()
+        hex_preview = encrypted_container[:64].hex()
+        formatted_hex = " ".join([hex_preview[i:i+2] for i in range(0, len(hex_preview), 2)])
+
+        _dashboard_session_cache[anon_study_uid] = {
+            "file_name": original_filename,
+            "pre_pii_tags": pre_pii_tags,
+            "post_pii_tags": post_pii_tags,
+            "was_redacted": was_redacted,
+            "raw_image_data_url": raw_image_data_url,
+            "redacted_image_data_url": redacted_image_data_url,
+        }
+
+        # Step 5: In-Memory Deep Learning Diagnostic Inference
+        decrypted_bytes = decrypt_envelope(encrypted_container, _dashboard_kms)
+        inference_ds = pydicom.dcmread(io.BytesIO(decrypted_bytes), force=True)
+
     engine = _dashboard_engine
     inference_result = engine.predict(inference_ds)
-    
+
     # Generate Grad-CAM Heatmap
     valid_pathology = pathology_heatmap if pathology_heatmap in [p["pathology"] for p in inference_result["predictions"]] else "Pneumonia"
     heatmap_pil = engine.generate_heatmap_image(inference_ds, valid_pathology)
@@ -261,8 +321,8 @@ def analyze_dashboard_study(
     # Build Side-by-Side Tag Diff Matrix
     tag_diff_matrix = []
     for tag_name, label, tag_hex in TRACKED_PII_TAGS:
-        before_val = pre_pii_tags[tag_name]
-        after_val = post_pii_tags[tag_name]
+        before_val = pre_pii_tags.get(tag_name, "(empty)")
+        after_val = post_pii_tags.get(tag_name, "[SCRUBBED / DELETED]")
         is_modified = before_val != after_val
         is_scrubbed = "[SCRUBBED" in after_val or after_val == "NO" or after_val.startswith("2.25.") or after_val.startswith("ANON_")
         tag_diff_matrix.append({
@@ -281,10 +341,24 @@ def analyze_dashboard_study(
     elif any(p["triage_urgency"] == "ELEVATED" for p in inference_result["predictions"]):
         top_urgency = "ELEVATED"
 
+    top_pred = max(inference_result["predictions"], key=lambda x: x["probability"])
+    _dashboard_worklist[anon_study_uid] = {
+        "anonymous_study_instance_uid": anon_study_uid,
+        "file_name": original_filename,
+        "modality": str(getattr(inference_ds, "Modality", "DX")),
+        "overall_triage_urgency": top_urgency,
+        "top_pathology": top_pred["pathology"],
+        "top_probability": top_pred["probability"],
+        "shannon_entropy": round(shannon_entropy, 5),
+        "is_shredded": False,
+        "ingested_at_utc": datetime.now(timezone.utc).isoformat(),
+    }
+
     return {
         "status": "SUCCESS",
         "file_name": original_filename,
         "anonymous_study_instance_uid": anon_study_uid,
+        "dicom_url": f"/api/v1/dashboard/studies/{anon_study_uid}/dicom",
         "security": {
             "encryption_algorithm": "AES-256-GCM Envelope Encryption",
             "container_magic_header": "MEDENC01",
@@ -321,6 +395,48 @@ def analyze_dashboard_study(
     }
 
 
+@router.get("/api/v1/dashboard/worklist", tags=["Clinical Dashboard"])
+def list_dashboard_worklist():
+    """Returns ingested studies sorted by AI clinical triage urgency then recency."""
+    urgency_rank = {"STAT_CRITICAL": 0, "ELEVATED": 1, "ROUTINE": 2}
+    items = sorted(
+        _dashboard_worklist.values(),
+        key=lambda item: (urgency_rank.get(item["overall_triage_urgency"], 9), item["ingested_at_utc"]),
+    )
+    return {"worklist": items}
+
+
+@router.get("/api/v1/dashboard/studies/{study_uid}/dicom", tags=["Clinical Dashboard"])
+def stream_dashboard_dicom(
+    study_uid: str,
+    download: bool = False,
+    settings: Settings = Depends(get_settings)
+):
+    """
+    Streams decrypted sanitized DICOM Part 10 bytes for Cornerstone3D wadouri rendering
+    or attachment download. Fails immediately (HTTP 410) once study KEK is crypto-shredded.
+    """
+    store = _dashboard_store.get(settings.storage_path) or EncryptedStore(storage_dir=settings.storage_path)
+    if not store.exists(study_uid):
+        raise HTTPException(status_code=404, detail="Study not found in encrypted storage")
+
+    enc_blob = store.load(study_uid)
+    try:
+        plaintext_bytes = decrypt_envelope(enc_blob, _dashboard_kms)
+    except Exception as e:
+        raise HTTPException(
+            status_code=410,
+            detail=f"Study cryptographic key has been revoked (DPDP Sec. 12 Crypto-Shredded): {str(e)}"
+        )
+
+    disposition = "attachment" if download else "inline"
+    return Response(
+        content=plaintext_bytes,
+        media_type="application/dicom",
+        headers={"Content-Disposition": f'{disposition}; filename="sanitized_{study_uid[-12:]}.dcm"'},
+    )
+
+
 @router.post("/api/v1/dashboard/shred/{study_uid}", tags=["Clinical Dashboard"])
 def demo_crypto_shredding(study_uid: str, settings: Settings = Depends(get_settings)):
     """
@@ -337,6 +453,10 @@ def demo_crypto_shredding(study_uid: str, settings: Settings = Depends(get_setti
         _dashboard_kms.revoke_key(study_kek_id)
     except Exception:
         pass
+
+    if study_uid in _dashboard_worklist:
+        _dashboard_worklist[study_uid]["is_shredded"] = True
+    _dashboard_session_cache.pop(study_uid, None)
     
     # Verify Decryption Fails
     verification_failed = False

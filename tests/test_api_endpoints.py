@@ -138,29 +138,73 @@ def test_dashboard_ui_and_analysis_service(tmp_path):
     assert analysis["images"]["gradcam_heatmap_url"].startswith("data:image/png;base64,")
 
 
-def test_dashboard_download_decrypted_scan(tmp_path):
-    from medshield.api.routes.dashboard import analyze_dashboard_study, download_dashboard_study
+def test_dashboard_cornerstone_dicom_stream_worklist_and_reanalyze(tmp_path):
     from fastapi import HTTPException
+    from medshield.api.routes.dashboard import (
+        analyze_dashboard_study,
+        stream_dashboard_dicom,
+        list_dashboard_worklist,
+        demo_crypto_shredding,
+    )
 
     settings = Settings(storage_path=str(tmp_path))
+
+    # 1. Analyze Patient 01
     analysis = analyze_dashboard_study(
         file=None,
         sample_id="patient_01_pneumonia",
         pathology_heatmap="Pneumonia",
-        settings=settings
+        settings=settings,
     )
     study_uid = analysis["anonymous_study_instance_uid"]
+    assert analysis["dicom_url"] == f"/api/v1/dashboard/studies/{study_uid}/dicom"
 
-    # 1. Download valid study
-    res = download_dashboard_study(study_uid=study_uid, settings=settings)
-    assert res.status_code == 200
-    assert res.media_type == "application/dicom"
-    assert "attachment; filename=" in res.headers["Content-Disposition"]
-    assert len(res.body) > 1000
+    # 2. Fetch raw sanitized DICOM Part 10 stream for Cornerstone3D
+    dicom_res = stream_dashboard_dicom(study_uid=study_uid, download=False, settings=settings)
+    assert dicom_res.status_code == 200
+    assert dicom_res.media_type == "application/dicom"
+    assert dicom_res.body[128:132] == b"DICM"
 
-    # 2. Non-existent study throws 404
+    ds = pydicom.dcmread(io.BytesIO(dicom_res.body))
+    assert str(ds.StudyInstanceUID) == study_uid
+    assert "PatientName" not in ds
+
+    # 3. Verify download=True sets attachment disposition
+    dl_res = stream_dashboard_dicom(study_uid=study_uid, download=True, settings=settings)
+    assert "attachment; filename=" in dl_res.headers["Content-Disposition"]
+
+    # 4. Recompute Grad-CAM on stored study by study_uid without re-uploading file
+    reanalysis = analyze_dashboard_study(
+        file=None,
+        sample_id=None,
+        study_uid=study_uid,
+        pathology_heatmap="Cardiomegaly",
+        settings=settings,
+    )
+    assert reanalysis["ai_diagnostics"]["active_heatmap_pathology"] == "Cardiomegaly"
+    assert reanalysis["images"]["gradcam_heatmap_url"].startswith("data:image/png;base64,")
+
+    # 5. Ingest Patient 02 and check Worklist listing
+    analysis_2 = analyze_dashboard_study(
+        file=None,
+        sample_id="patient_02_effusion",
+        pathology_heatmap="Pleural Effusion",
+        settings=settings,
+    )
+    uid_2 = analysis_2["anonymous_study_instance_uid"]
+    worklist = list_dashboard_worklist()
+    assert any(item["anonymous_study_instance_uid"] == study_uid for item in worklist["worklist"])
+    assert any(item["anonymous_study_instance_uid"] == uid_2 for item in worklist["worklist"])
+
+    # 6. Crypto-shredding Study 1 blocks DICOM stream for Study 1 while keeping Study 2 accessible
+    shred_res = demo_crypto_shredding(study_uid=study_uid, settings=settings)
+    assert shred_res["status"] == "CRYPTO_SHREDDED"
+
     with pytest.raises(HTTPException) as exc_info:
-        download_dashboard_study(study_uid="2.25.00000000000000", settings=settings)
-    assert exc_info.value.status_code == 404
+        stream_dashboard_dicom(study_uid=study_uid, download=False, settings=settings)
+    assert exc_info.value.status_code in (403, 410)
+
+    study2_dicom = stream_dashboard_dicom(study_uid=uid_2, download=False, settings=settings)
+    assert study2_dicom.status_code == 200
 
 
