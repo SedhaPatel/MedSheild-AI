@@ -356,606 +356,1120 @@ def demo_crypto_shredding(study_uid: str, settings: Settings = Depends(get_setti
     }
 
 
-@router.get("/api/v1/dashboard/download/{study_uid}", tags=["Clinical Dashboard"])
-def download_dashboard_study(study_uid: str, settings: Settings = Depends(get_settings)):
-    """Decrypts and delivers the de-identified radiograph for medical PACS review."""
-    store = _dashboard_store.get(settings.storage_path) or EncryptedStore(storage_dir=settings.storage_path)
-    if not store.exists(study_uid):
-        raise HTTPException(status_code=404, detail="Study not found in encrypted storage")
-    enc_blob = store.load(study_uid)
-    try:
-        decrypted_bytes = decrypt_envelope(enc_blob, _dashboard_kms)
-    except Exception as e:
-        raise HTTPException(status_code=410, detail=f"Study cannot be decrypted (possibly crypto-shredded): {str(e)}")
-
-    return Response(
-        content=decrypted_bytes,
-        media_type="application/dicom",
-        headers={"Content-Disposition": f'attachment; filename="sanitized_{study_uid[:12]}.dcm"'}
-    )
-
-
 @router.get("/dashboard", response_class=HTMLResponse, tags=["Clinical Dashboard"])
 def serve_dashboard_ui():
-    """Serves the modern Tailwind CSS + Lucide Icons dark workstation UI."""
+    """Serves the MedShield-AI Clinical Reading & Security Console UI."""
     return HTMLResponse(content=DASHBOARD_HTML_PAGE)
 
 
-DASHBOARD_HTML_PAGE = """<!DOCTYPE html>
-<html lang="en" class="dark">
+DASHBOARD_HTML_PAGE = r"""<!DOCTYPE html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MedShield-AI &bull; Clinical Diagnostic &amp; Security Console</title>
-  
-  <!-- Fonts -->
+  <title>MedShield-AI — Clinical Reading &amp; Security Console</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  
-  <!-- Tailwind CSS 3.x CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            obsidian: '#080C14',
-            cardBg: '#0E1524',
-            cardHover: '#141E33',
-            borderSubtle: '#1E2A44',
-            surfaceWell: '#121B2D',
-          },
-          fontFamily: {
-            sans: ['Plus Jakarta Sans', 'system-ui', 'sans-serif'],
-            mono: ['JetBrains Mono', 'monospace'],
-          }
-        }
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --surface-0: #0C0E13;
+      --surface-1: #13161D;
+      --surface-2: #1A1D26;
+      --surface-3: #0F1117;
+      --border: rgba(255, 255, 255, 0.07);
+      --border-focus: rgba(255, 255, 255, 0.22);
+      --text-primary: #E8E9ED;
+      --text-secondary: #A0A5B1;
+      --text-muted: #787D8A;
+      --accent-verified: #34D399;
+      --accent-attention: #FBBF24;
+      --accent-critical: #F87171;
+      --accent-info: #60A5FA;
+      --radius-sm: 6px;
+      --radius-md: 8px;
+      --radius-viewport: 4px;
+    }
+
+    html {
+      font-size: 13px;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    body {
+      font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--surface-0);
+      color: var(--text-primary);
+      line-height: 1.5;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.24); }
+
+    /* Focus visibility */
+    :focus-visible {
+      outline: 2px solid var(--border-focus);
+      outline-offset: 2px;
+    }
+
+    /* Typography & helpers */
+    .mono { font-family: 'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
+    .label { font-size: 11px; font-weight: 500; color: var(--text-secondary); letter-spacing: 0.02em; }
+    .caption { font-size: 11px; color: var(--text-muted); }
+    .h2 { font-size: 13px; font-weight: 600; color: var(--text-primary); letter-spacing: -0.01em; }
+    .value { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+
+    /* Status Badges */
+    .badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 11px; font-weight: 500; padding: 2px 8px;
+      border-radius: var(--radius-sm); border: 1px solid;
+      line-height: 1.4; white-space: nowrap;
+    }
+    .badge-verified { background: rgba(52, 211, 153, 0.08); color: var(--accent-verified); border-color: rgba(52, 211, 153, 0.22); }
+    .badge-attention { background: rgba(251, 191, 36, 0.08); color: var(--accent-attention); border-color: rgba(251, 191, 36, 0.22); }
+    .badge-critical { background: rgba(248, 113, 113, 0.08); color: var(--accent-critical); border-color: rgba(248, 113, 113, 0.24); }
+    .badge-info { background: rgba(96, 165, 250, 0.08); color: var(--accent-info); border-color: rgba(96, 165, 250, 0.22); }
+    .badge-neutral { background: rgba(255, 255, 255, 0.04); color: var(--text-secondary); border-color: var(--border); }
+
+    /* Shell Grid: 240px left / fluid center / 320px right */
+    .shell {
+      display: grid;
+      grid-template-columns: 240px 1fr 320px;
+      grid-template-rows: 44px 1fr;
+      height: 100vh;
+    }
+
+    /* Top Bar */
+    .topbar {
+      grid-column: 1 / -1;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 16px; height: 44px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface-1);
+    }
+    .topbar-left { display: flex; align-items: center; gap: 12px; }
+    .topbar-title {
+      font-size: 13px; font-weight: 600; letter-spacing: -0.01em;
+      display: flex; align-items: center; gap: 8px; color: var(--text-primary);
+    }
+    .topbar-title svg { width: 15px; height: 15px; stroke: var(--accent-verified); flex-shrink: 0; }
+    .topbar-divider { width: 1px; height: 14px; background: var(--border); }
+    .study-pill { font-size: 11px; color: var(--text-secondary); }
+    .topbar-meta { display: flex; align-items: center; gap: 8px; }
+
+    /* Sidebars */
+    .sidebar {
+      border-right: 1px solid var(--border);
+      background: var(--surface-1);
+      padding: 16px;
+      overflow-y: auto;
+      display: flex; flex-direction: column; gap: 20px;
+    }
+    .main {
+      display: flex; flex-direction: column;
+      overflow: hidden;
+      background: var(--surface-0);
+    }
+    .aside {
+      border-left: 1px solid var(--border);
+      background: var(--surface-1);
+      padding: 16px;
+      overflow-y: auto;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+
+    /* Panels */
+    .panel {
+      background: var(--surface-0);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+    }
+    .panel-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface-1);
+    }
+    .panel-header .h2 { display: flex; align-items: center; gap: 6px; }
+    .panel-header svg { width: 14px; height: 14px; stroke: var(--text-secondary); flex-shrink: 0; }
+    .panel-body { padding: 12px 14px; }
+
+    /* Dropzone */
+    .dropzone {
+      border: 1px dashed var(--border-focus);
+      border-radius: var(--radius-md);
+      background: var(--surface-3);
+      padding: 18px 12px;
+      text-align: center;
+      cursor: pointer;
+      touch-action: manipulation;
+      transition: border-color 0.15s, background-color 0.15s;
+    }
+    .dropzone:hover, .dropzone.dragover {
+      border-color: var(--accent-info);
+      background: rgba(96, 165, 250, 0.04);
+    }
+    .dropzone:active { transform: scale(0.985); }
+    .dropzone input { display: none; }
+    .dropzone-icon { width: 22px; height: 22px; stroke: var(--text-muted); margin: 0 auto 6px; display: block; }
+    .dropzone-label { font-size: 12px; font-weight: 500; color: var(--text-primary); }
+    .dropzone-hint { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+    /* Sample Case Buttons */
+    .case-list { display: flex; flex-direction: column; gap: 6px; }
+    .case-btn {
+      display: block; width: 100%; text-align: left;
+      padding: 9px 12px;
+      background: var(--surface-0);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      touch-action: manipulation;
+      transition: border-color 0.15s, background-color 0.15s, transform 0.1s;
+      color: var(--text-primary);
+      font-family: inherit;
+    }
+    .case-btn:hover { border-color: var(--border-focus); background: var(--surface-2); }
+    .case-btn:active { transform: scale(0.97); }
+    .case-btn.is-active {
+      border-color: rgba(96, 165, 250, 0.45);
+      background: rgba(96, 165, 250, 0.06);
+    }
+    .case-top { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+    .case-title { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+    .case-desc { font-size: 11px; color: var(--text-muted); margin-top: 3px; line-height: 1.35; }
+
+    /* System Spec Footer */
+    .sys-spec {
+      margin-top: auto;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+      display: flex; flex-direction: column; gap: 5px;
+    }
+    .sys-row { display: flex; justify-content: space-between; align-items: center; font-size: 11px; }
+    .sys-row span:first-child { color: var(--text-muted); }
+    .sys-row span:last-child { color: var(--text-secondary); font-weight: 500; }
+
+    /* Film Viewer Toolbar */
+    .viewport-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface-1);
+      padding-right: 12px;
+    }
+    .viewport-tabs { display: flex; }
+    .viewport-tab {
+      padding: 9px 16px;
+      font-size: 12px; font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      touch-action: manipulation;
+      border: none; background: none;
+      border-bottom: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+      font-family: inherit;
+    }
+    .viewport-tab:hover { color: var(--text-primary); }
+    .viewport-tab.active { color: var(--text-primary); border-bottom-color: var(--text-primary); font-weight: 600; }
+    .viewport-bar-right { display: flex; align-items: center; gap: 8px; }
+
+    /* Light-box Signature Stage */
+    .viewport-stage {
+      flex: 1;
+      position: relative;
+      display: flex; align-items: center; justify-content: center;
+      background: #030406;
+      overflow: hidden;
+      min-height: 360px;
+      user-select: none;
+      cursor: default;
+    }
+    .viewport-stage.can-pan { cursor: grab; }
+    .viewport-stage.is-panning { cursor: grabbing; }
+    .viewport-stage::after {
+      content: "";
+      position: absolute; inset: 0;
+      background: radial-gradient(circle at center, transparent 52%, rgba(0, 0, 0, 0.72) 100%);
+      pointer-events: none;
+      z-index: 3;
+    }
+
+    .film-transform-layer {
+      position: relative;
+      display: flex; align-items: center; justify-content: center;
+      width: 100%; height: 100%;
+      padding: 16px;
+      transform-origin: center center;
+      transition: transform 0.12s cubic-bezier(0.23, 1, 0.32, 1);
+    }
+    .viewport-stage.is-panning .film-transform-layer { transition: none; }
+
+    .film-frame {
+      position: relative;
+      display: inline-flex; align-items: center; justify-content: center;
+      max-width: 100%; max-height: 100%;
+      border-radius: var(--radius-viewport);
+      outline: 1px solid rgba(255, 255, 255, 0.09);
+    }
+    .film-img {
+      display: block;
+      max-width: 100%;
+      max-height: calc(100vh - 340px);
+      object-fit: contain;
+      border-radius: var(--radius-viewport);
+      pointer-events: none;
+    }
+    .film-img.inverted { filter: invert(1); }
+    .film-heatmap-overlay {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: contain;
+      border-radius: var(--radius-viewport);
+      pointer-events: none;
+      transition: opacity 0.12s linear;
+    }
+
+    .viewport-placeholder {
+      position: relative; z-index: 2;
+      color: var(--text-muted); font-size: 12px;
+      display: flex; flex-direction: column;
+      align-items: center; gap: 8px;
+      text-align: center; padding: 24px;
+    }
+    .viewport-placeholder svg { width: 32px; height: 32px; stroke: var(--text-muted); opacity: 0.55; }
+
+    /* Viewport Dock Overlay */
+    .viewport-controls {
+      position: absolute; bottom: 12px; left: 12px; right: 12px;
+      z-index: 5;
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;
+      padding: 6px 12px;
+      background: rgba(12, 14, 19, 0.92);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      opacity: 0.78;
+      transition: opacity 0.18s ease;
+    }
+    .viewport-stage:hover .viewport-controls,
+    .viewport-controls:focus-within { opacity: 1; }
+    .viewport-controls select {
+      background: var(--surface-3); border: 1px solid var(--border);
+      color: var(--text-primary); font-size: 11px; padding: 4px 8px;
+      border-radius: var(--radius-sm); font-family: inherit; cursor: pointer;
+    }
+    .ctrl-group { display: flex; align-items: center; gap: 6px; }
+    .ctrl-label { font-size: 11px; color: var(--text-secondary); }
+    .ctrl-btn {
+      min-width: 28px; height: 28px; padding: 0 6px;
+      display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+      background: transparent; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); cursor: pointer; color: var(--text-secondary);
+      font-size: 11px; font-family: inherit;
+      touch-action: manipulation;
+      transition: background-color 0.15s, color 0.15s, border-color 0.15s, transform 0.1s;
+    }
+    .ctrl-btn:hover { background: var(--surface-2); color: var(--text-primary); border-color: var(--border-focus); }
+    .ctrl-btn:active { transform: scale(0.96); }
+    .ctrl-btn.is-active { background: var(--surface-2); color: var(--text-primary); border-color: var(--border-focus); }
+    .ctrl-btn svg { width: 13px; height: 13px; flex-shrink: 0; }
+    .opacity-slider { width: 84px; height: 4px; accent-color: var(--accent-info); cursor: pointer; }
+
+    /* Lower PII Audit Matrix */
+    .pii-section {
+      border-top: 1px solid var(--border);
+      background: var(--surface-0);
+      display: flex; flex-direction: column;
+      height: 215px;
+    }
+    .pii-section-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 7px 14px;
+      background: var(--surface-1);
+      border-bottom: 1px solid var(--border);
+    }
+    .pii-wrap { flex: 1; overflow-y: auto; }
+    .pii-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .pii-table thead { position: sticky; top: 0; background: var(--surface-1); z-index: 2; }
+    .pii-table th {
+      padding: 7px 12px; font-size: 11px; font-weight: 500;
+      color: var(--text-secondary); text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    .pii-table th:last-child { text-align: right; }
+    .pii-table td { padding: 6px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.035); vertical-align: middle; }
+    .pii-table tbody tr:nth-child(even) td { background: rgba(255, 255, 255, 0.015); }
+    .pii-table .val-original { color: var(--accent-critical); font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
+    .pii-table .val-sanitized { color: var(--accent-verified); font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
+    .pii-table td:last-child { text-align: right; }
+    .pii-empty { padding: 28px 12px; text-align: center; color: var(--text-muted); font-size: 12px; }
+
+    /* Interactive Predictions List */
+    .pred-list { display: flex; flex-direction: column; gap: 4px; }
+    .pred-row {
+      display: grid; grid-template-columns: 1fr 78px 46px;
+      align-items: center; gap: 8px;
+      padding: 6px 8px;
+      margin: 0 -8px;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+      background: transparent;
+      color: inherit; font-family: inherit; text-align: left;
+      cursor: pointer; width: calc(100% + 16px);
+      transition: background-color 0.15s, border-color 0.15s;
+    }
+    .pred-row:hover { background: var(--surface-2); }
+    .pred-row.is-focused {
+      background: var(--surface-2);
+      border-color: var(--border-focus);
+    }
+    .pred-meta { display: flex; flex-direction: column; }
+    .pred-label { font-size: 12px; font-weight: 500; color: var(--text-primary); }
+    .pred-uncertainty { font-size: 10px; color: var(--text-muted); font-family: 'IBM Plex Mono', monospace; }
+    .pred-bar-track {
+      width: 100%; height: 5px; background: var(--surface-2);
+      border-radius: 3px; overflow: hidden;
+    }
+    .pred-bar-fill {
+      height: 100%; border-radius: 3px;
+      background: var(--accent-info);
+      transition: width 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+    }
+    .pred-bar-fill.elevated { background: var(--accent-attention); }
+    .pred-bar-fill.critical { background: var(--accent-critical); }
+    .pred-value { text-align: right; font-size: 12px; font-weight: 600; font-family: 'IBM Plex Mono', monospace; }
+
+    /* Metrics & Crypto */
+    .metric { padding: 8px 0; border-bottom: 1px solid var(--border); }
+    .metric:first-child { padding-top: 0; }
+    .metric:last-child { padding-bottom: 0; border-bottom: none; }
+    .metric-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+    .mono-box {
+      margin-top: 4px; padding: 6px 8px;
+      background: var(--surface-3); border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+      color: var(--text-secondary); word-break: break-all; line-height: 1.45;
+    }
+    .copy-btn {
+      width: 100%; text-align: left; cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .copy-btn:hover { border-color: var(--border-focus); color: var(--text-primary); }
+    .entropy-track {
+      width: 100%; height: 4px; background: var(--surface-2);
+      border-radius: 2px; overflow: hidden; margin-top: 6px;
+    }
+    .entropy-fill {
+      height: 100%; border-radius: 2px;
+      background: var(--accent-verified);
+      transition: width 0.4s cubic-bezier(0.23, 1, 0.32, 1);
+    }
+
+    /* Inline Two-Step Shred Controls */
+    .shred-btn {
+      width: 100%; padding: 8px 12px;
+      background: transparent;
+      border: 1px solid rgba(248, 113, 113, 0.28);
+      color: var(--accent-critical);
+      font-size: 12px; font-weight: 500;
+      border-radius: var(--radius-sm);
+      cursor: pointer; font-family: inherit;
+      touch-action: manipulation;
+      transition: background-color 0.15s, border-color 0.15s, transform 0.1s;
+    }
+    .shred-btn:hover:not(:disabled) { background: rgba(248, 113, 113, 0.08); border-color: rgba(248, 113, 113, 0.5); }
+    .shred-btn:active:not(:disabled) { transform: scale(0.97); }
+    .shred-btn:disabled { opacity: 0.38; cursor: not-allowed; }
+    .shred-confirm-bar { display: none; gap: 6px; }
+    .shred-confirm-bar.is-armed { display: flex; }
+    .btn-ghost {
+      flex: 1; padding: 7px 10px; background: var(--surface-2);
+      border: 1px solid var(--border); color: var(--text-secondary);
+      border-radius: var(--radius-sm); font-size: 11px; font-weight: 500;
+      cursor: pointer; font-family: inherit;
+    }
+    .btn-ghost:hover { color: var(--text-primary); border-color: var(--border-focus); }
+    .btn-danger-solid {
+      flex: 1.4; padding: 7px 10px; background: rgba(248, 113, 113, 0.16);
+      border: 1px solid rgba(248, 113, 113, 0.45); color: var(--accent-critical);
+      border-radius: var(--radius-sm); font-size: 11px; font-weight: 600;
+      cursor: pointer; font-family: inherit;
+    }
+    .btn-danger-solid:hover { background: rgba(248, 113, 113, 0.25); }
+
+    /* Toast */
+    .toast-container {
+      position: fixed; bottom: 16px; right: 16px;
+      display: flex; flex-direction: column-reverse; gap: 8px;
+      z-index: 100; pointer-events: none;
+    }
+    .toast {
+      pointer-events: auto;
+      min-width: 260px; max-width: 340px;
+      padding: 10px 14px;
+      background: var(--surface-2);
+      border: 1px solid var(--border-focus);
+      border-radius: var(--radius-sm);
+      display: flex; align-items: flex-start; gap: 10px;
+      animation: toast-in 0.22s cubic-bezier(0.23, 1, 0.32, 1);
+    }
+    .toast.out { animation: toast-out 0.18s ease-in forwards; }
+    .toast-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; }
+    .toast-dot.success { background: var(--accent-verified); }
+    .toast-dot.error { background: var(--accent-critical); }
+    .toast-dot.warning { background: var(--accent-attention); }
+    .toast-dot.info { background: var(--accent-info); }
+    .toast-body { flex: 1; }
+    .toast-title { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+    .toast-msg { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+    @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+    @keyframes toast-out { to { opacity: 0; transform: translateY(8px); } }
+
+    /* Loader */
+    .loader-overlay {
+      position: fixed; inset: 0; z-index: 90;
+      background: rgba(12, 14, 19, 0.72);
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: 10px;
+    }
+    .loader-overlay.hidden { display: none; }
+    .loader-spinner {
+      width: 24px; height: 24px;
+      border: 2px solid var(--border);
+      border-top-color: var(--text-primary);
+      border-radius: 50%;
+      animation: spin 0.65s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loader-text { font-size: 12px; color: var(--text-secondary); }
+
+    /* Reduced Motion */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
       }
     }
-  </script>
 
-  <!-- Lucide Icons -->
-  <script src="https://unpkg.com/lucide@latest"></script>
-
-  <style>
-    /* Custom Scrollbar */
-    ::-webkit-scrollbar { width: 5px; height: 5px; }
-    ::-webkit-scrollbar-track { background: #080C14; }
-    ::-webkit-scrollbar-thumb { background: #1E2A44; border-radius: 4px; }
-    ::-webkit-scrollbar-thumb:hover { background: #0EA5E9; }
-
-    /* Floating Toast Animation */
-    .toast-anim { animation: toastSlide 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-    @keyframes toastSlide {
-      from { transform: translateY(-12px); opacity: 0; }
-      to { transform: translateY(0); opacity: 1; }
+    /* Responsive (< 1024px): Stack with radiograph viewer first */
+    @media (max-width: 1024px) {
+      .shell {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto;
+        height: auto;
+      }
+      .topbar { order: 0; }
+      .main { order: 1; }
+      .sidebar { order: 2; border-right: none; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+      .aside { order: 3; border-left: none; }
+      .viewport-stage { min-height: 420px; }
+      .film-img { max-height: 520px; }
+      .pii-section { height: auto; max-height: 260px; }
+    }
+    @media (max-width: 640px) {
+      .topbar-meta { display: none; }
+      .topbar-divider { display: none; }
+      .study-pill { display: none; }
     }
   </style>
 </head>
-<body class="bg-obsidian text-slate-100 font-sans min-h-screen flex flex-col selection:bg-cyan-500/20 selection:text-cyan-300">
+<body>
+  <div id="loader" class="loader-overlay hidden" role="status" aria-live="polite">
+    <div class="loader-spinner"></div>
+    <div id="loaderText" class="loader-text">Processing study</div>
+  </div>
 
-  <!-- Toast Notification Container -->
-  <div id="toastContainer" class="fixed top-4 right-4 z-50 flex flex-col gap-2.5 max-w-md w-full pointer-events-none"></div>
+  <div id="toastContainer" class="toast-container" aria-live="polite"></div>
 
-  <!-- TOP BAR: Minimalist Branding + Security Pill -->
-  <header class="h-14 bg-cardBg/90 backdrop-blur-md border-b border-borderSubtle px-6 sticky top-0 z-40 flex items-center justify-between">
-    <div class="flex items-center gap-3">
-      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-sky-600 flex items-center justify-center text-white shadow-md shadow-cyan-500/20">
-        <i data-lucide="shield" class="w-4 h-4"></i>
-      </div>
-      <div class="flex items-center gap-2">
-        <span class="text-sm font-bold tracking-tight text-white">MedShield-AI</span>
-        <span class="text-[11px] font-medium text-slate-400 bg-surfaceWell px-2 py-0.5 rounded border border-borderSubtle">Clinical Console</span>
-      </div>
-    </div>
-
-    <!-- Security Assurance Pill -->
-    <div class="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium">
-      <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-      <span>System Secure (AES-256 / TLS 1.3)</span>
-    </div>
-  </header>
-
-  <!-- MAIN PROGRESSIVE DISCLOSURE AREA (2 Clean Cards Side-by-Side) -->
-  <main class="flex-1 p-6 max-w-6xl w-full mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-    
-    <!-- LEFT CARD: Medical Scan Viewport & Upload Stage -->
-    <section class="bg-cardBg border border-borderSubtle rounded-2xl p-5 shadow-xl flex flex-col min-h-[580px]">
-      
-      <div class="flex items-center justify-between pb-3 border-b border-borderSubtle mb-4">
-        <div class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400">
-          <i data-lucide="image" class="w-4 h-4 text-cyan-400"></i>
-          <span>Medical Radiograph</span>
+  <div class="shell">
+    <!-- Top Bar -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="topbar-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          <span>MedShield-AI</span>
         </div>
-        <button id="resetScanBtn" onclick="resetToUpload()" class="hidden text-xs text-slate-400 hover:text-white flex items-center gap-1 transition-colors">
-          <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
-          <span>New Scan</span>
-        </button>
+        <span class="topbar-divider" aria-hidden="true"></span>
+        <span class="study-pill mono" id="studyFileLabel">No study active</span>
       </div>
+      <div class="topbar-meta">
+        <span class="badge badge-verified">AES-256-GCM</span>
+        <span class="badge badge-neutral">PS 3.15 Annex E</span>
+        <span class="badge badge-neutral" id="weightsHeaderBadge">DenseNet121</span>
+      </div>
+    </header>
 
-      <!-- State 1: Pre-Upload Drag & Drop Zone -->
-      <div id="dropzoneContainer" class="flex-1 flex flex-col justify-center">
-        <div id="dropzone" class="border-2 border-dashed border-borderSubtle hover:border-cyan-500/60 bg-surfaceWell/60 hover:bg-cyan-500/5 rounded-xl p-8 text-center cursor-pointer transition-all duration-200 group">
-          <div class="w-14 h-14 rounded-2xl bg-cardBg border border-borderSubtle mx-auto flex items-center justify-center text-cyan-400 mb-3 group-hover:scale-105 transition-transform shadow-inner">
-            <i data-lucide="cloud-upload" class="w-7 h-7"></i>
-          </div>
-          <p class="text-sm font-semibold text-white">Drop DICOM (.dcm) or Scan (.png)</p>
-          <p class="text-xs text-slate-400 mt-1 max-w-xs mx-auto">DICOM PS 3.15 de-identification and AES-256-GCM encryption run instantly upon upload.</p>
-          <input type="file" id="fileInput" class="hidden" accept=".dcm,.png,.jpg,.jpeg">
-        </div>
-
-        <!-- 3 Quick Pre-Packaged Cases -->
-        <div class="mt-6">
-          <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2.5">Or test with a pre-packaged clinical case:</p>
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <button onclick="loadSample('patient_01_pneumonia')" class="p-2.5 rounded-lg bg-surfaceWell hover:bg-cardHover border border-borderSubtle hover:border-cyan-500/50 text-left transition-all">
-              <span class="text-xs font-semibold text-white block">Patient 01</span>
-              <span class="text-[10px] text-amber-400 font-medium">Pneumonia</span>
-            </button>
-            <button onclick="loadSample('patient_02_effusion')" class="p-2.5 rounded-lg bg-surfaceWell hover:bg-cardHover border border-borderSubtle hover:border-cyan-500/50 text-left transition-all">
-              <span class="text-xs font-semibold text-white block">Patient 02</span>
-              <span class="text-[10px] text-amber-400 font-medium">Pleural Effusion</span>
-            </button>
-            <button onclick="loadSample('patient_03_cardiomegaly')" class="p-2.5 rounded-lg bg-surfaceWell hover:bg-cardHover border border-borderSubtle hover:border-cyan-500/50 text-left transition-all">
-              <span class="text-xs font-semibold text-white block">Patient 03</span>
-              <span class="text-[10px] text-amber-400 font-medium">Cardiomegaly</span>
-            </button>
-          </div>
+    <!-- Left Rail: Study Ingestion -->
+    <nav class="sidebar" aria-label="Study Ingestion">
+      <div>
+        <div class="label" style="margin-bottom: 8px;">Ingest Study</div>
+        <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Upload DICOM or PNG chest radiograph" onclick="document.getElementById('fileInput').click()">
+          <input type="file" id="fileInput" accept=".dcm,.png,.jpg,.jpeg">
+          <svg class="dropzone-icon" viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <div class="dropzone-label">Drop scan or click</div>
+          <div class="dropzone-hint">.dcm, .png, .jpg</div>
         </div>
       </div>
 
-      <!-- Loading State -->
-      <div id="loader" class="hidden flex-1 flex flex-col items-center justify-center p-8 text-center">
-        <div class="w-10 h-10 border-2 border-cyan-400/20 border-t-cyan-400 rounded-full animate-spin mb-3"></div>
-        <p class="text-sm font-semibold text-white" id="loaderText">De-identifying &amp; evaluating radiograph...</p>
-        <p class="text-xs text-slate-400 mt-1">Executing DICOM PS 3.15 redaction, AES-256 sealing, and DenseNet-121 inference</p>
-      </div>
-
-      <!-- State 2: Loaded Medical Scan Viewport -->
-      <div id="scanStage" class="hidden flex-1 flex flex-col">
-        <div class="relative bg-black rounded-xl border border-borderSubtle flex items-center justify-center h-[400px] overflow-hidden">
-          <img id="mainScanImg" src="" alt="Medical Scan" class="max-h-[390px] max-w-full object-contain transition-opacity duration-300">
-        </div>
-
-        <!-- Heatmap Toggle Switch -->
-        <div class="mt-4 p-3 rounded-xl bg-surfaceWell border border-borderSubtle flex items-center justify-between">
-          <div class="flex items-center gap-2.5">
-            <i data-lucide="flame" class="w-4 h-4 text-orange-400"></i>
-            <div>
-              <span class="text-xs font-semibold text-white block">Show AI Heatmap (Grad-CAM)</span>
-              <span class="text-[11px] text-slate-400 block">Highlights anatomical regions driving model prediction</span>
+      <div>
+        <div class="label" style="margin-bottom: 8px;">Reference Cases</div>
+        <div class="case-list">
+          <button type="button" class="case-btn" data-sample="patient_01_pneumonia" onclick="loadSample('patient_01_pneumonia')">
+            <div class="case-top">
+              <span class="case-title">Patient 01: Pneumonia</span>
+              <span class="badge badge-attention">Elevated</span>
             </div>
-          </div>
-          
-          <label class="relative inline-flex items-center cursor-pointer">
-            <input type="checkbox" id="heatmapToggle" onchange="onToggleHeatmap(this.checked)" class="sr-only peer">
-            <div class="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-500"></div>
-          </label>
-        </div>
-
-        <!-- Pathology Selector (Visible when Heatmap is ON) -->
-        <div id="pathologySelectorContainer" class="hidden mt-2 flex items-center justify-between px-1 text-xs">
-          <span class="text-slate-400">Focus finding:</span>
-          <select id="pathologySelect" onchange="changeHeatmapTarget()" class="bg-surfaceWell border border-borderSubtle rounded px-2.5 py-1 text-xs text-white focus:outline-none focus:border-cyan-400">
-            <option value="Pneumonia">Pneumonia</option>
-            <option value="Cardiomegaly">Cardiomegaly</option>
-            <option value="Pleural Effusion">Pleural Effusion</option>
-            <option value="Pneumothorax">Pneumothorax</option>
-            <option value="Atelectasis">Atelectasis</option>
-          </select>
-        </div>
-      </div>
-
-    </section>
-
-    <!-- RIGHT CARD: Clinical Diagnosis & Security Summary -->
-    <section class="bg-cardBg border border-borderSubtle rounded-2xl p-5 shadow-xl flex flex-col min-h-[580px]">
-      
-      <div class="flex items-center justify-between pb-3 border-b border-borderSubtle mb-4">
-        <div class="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400">
-          <i data-lucide="activity" class="w-4 h-4 text-cyan-400"></i>
-          <span>Diagnosis &amp; Security Summary</span>
-        </div>
-        <span id="scanFilename" class="text-xs font-mono text-slate-400">Awaiting study</span>
-      </div>
-
-      <!-- State 1: Pre-Upload Placeholder -->
-      <div id="rightPlaceholder" class="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-500">
-        <div class="w-12 h-12 rounded-xl bg-surfaceWell border border-borderSubtle flex items-center justify-center text-slate-400 mb-3">
-          <i data-lucide="stethoscope" class="w-6 h-6"></i>
-        </div>
-        <p class="text-sm font-semibold text-slate-300">Awaiting Study Ingestion</p>
-        <p class="text-xs text-slate-400 mt-1 max-w-xs">Upload a chest radiograph or choose a patient case to view disease probabilities and cryptographic security metrics.</p>
-      </div>
-
-      <!-- State 2: Post-Upload Clinical & Security Panel -->
-      <div id="rightContent" class="hidden flex-1 flex flex-col justify-between space-y-4">
-        
-        <!-- SECTION 1: Primary AI Prediction -->
-        <div class="space-y-2.5">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold uppercase tracking-wider text-slate-400">Primary AI Prediction</span>
-            <span id="triageBadge" class="text-[10px] font-bold px-2 py-0.5 rounded border"></span>
-          </div>
-
-          <div class="p-4 rounded-xl bg-surfaceWell border border-borderSubtle">
-            <div class="flex items-baseline justify-between mb-2">
-              <h2 id="topFindingName" class="text-lg font-bold text-white tracking-tight">--</h2>
-              <span id="topConfidence" class="text-base font-mono font-bold text-cyan-400">--%</span>
-            </div>
-            
-            <!-- Clean Confidence Bar -->
-            <div class="w-full bg-slate-900 rounded-full h-2.5 overflow-hidden border border-borderSubtle mb-2">
-              <div id="confidenceBar" class="h-2.5 rounded-full bg-gradient-to-r from-sky-500 to-cyan-400 transition-all duration-700" style="width: 0%"></div>
-            </div>
-
-            <!-- Single-line Secondary Screenings -->
-            <p id="secondaryFindings" class="text-[11px] text-slate-400 truncate"></p>
-          </div>
-        </div>
-
-        <!-- SECTION 2: Compact Security Badge -->
-        <div class="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <i data-lucide="shield-check" class="w-4 h-4 text-emerald-400"></i>
-            <span class="text-xs font-semibold text-emerald-300">PII Stripped &bull; AES-256 Encrypted</span>
-          </div>
-          <span id="entropyScore" class="text-[11px] font-mono text-emerald-400 font-medium">Entropy 7.999 / 8.0</span>
-        </div>
-
-        <!-- SECTION 3: Collapsible Drawer (Hidden by default) -->
-        <div class="border border-borderSubtle rounded-xl overflow-hidden bg-surfaceWell/50">
-          <button onclick="toggleAuditDrawer()" class="w-full p-3 flex items-center justify-between text-xs font-semibold text-slate-300 hover:text-white hover:bg-surfaceWell transition-colors">
-            <div class="flex items-center gap-2">
-              <i data-lucide="file-check-2" class="w-4 h-4 text-cyan-400"></i>
-              <span>View Stripped DICOM Tags &amp; Hash</span>
-            </div>
-            <i id="drawerChevron" data-lucide="chevron-down" class="w-4 h-4 transition-transform duration-200"></i>
+            <div class="case-desc">Bilateral alveolar consolidation</div>
           </button>
-
-          <div id="auditDrawer" class="hidden p-3 pt-0 border-t border-borderSubtle/60 space-y-3">
-            
-            <!-- Ciphertext Hash & 1-Click Copy -->
-            <div class="mt-2.5 p-2 rounded-lg bg-obsidian border border-borderSubtle flex items-center justify-between gap-2">
-              <div class="truncate text-[11px] font-mono text-slate-400">
-                <span class="text-slate-400">SHA-256: </span>
-                <span id="sha256Digest" class="text-slate-300">--</span>
-              </div>
-              <button onclick="copyDigest()" title="Copy SHA-256 Hash" class="p-1 rounded hover:bg-cardBg text-slate-400 hover:text-cyan-300 transition-colors">
-                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
-              </button>
+          <button type="button" class="case-btn" data-sample="patient_02_effusion" onclick="loadSample('patient_02_effusion')">
+            <div class="case-top">
+              <span class="case-title">Patient 02: Effusion</span>
+              <span class="badge badge-attention">Elevated</span>
             </div>
-
-            <!-- 18 Safe Harbor Stripped Tags Table -->
-            <div class="max-h-44 overflow-y-auto border border-borderSubtle rounded-lg bg-obsidian/40">
-              <table class="w-full text-left text-[11px] font-mono">
-                <thead class="bg-cardBg text-slate-400 sticky top-0 border-b border-borderSubtle text-[10px]">
-                  <tr>
-                    <th class="py-1.5 px-2.5">Tag</th>
-                    <th class="py-1.5 px-2.5">Attribute</th>
-                    <th class="py-1.5 px-2.5">Original (PHI)</th>
-                    <th class="py-1.5 px-2.5 text-right">Status</th>
-                  </tr>
-                </thead>
-                <tbody id="tagTableBody" class="divide-y divide-borderSubtle">
-                </tbody>
-              </table>
-            </div>
-
-          </div>
-        </div>
-
-        <!-- SECTION 4: Action Footer (Download & Shred) -->
-        <div class="pt-2 flex flex-col sm:flex-row items-center gap-2.5">
-          <button id="downloadBtn" onclick="downloadDecryptedScan()" class="w-full flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-cyan-600 to-sky-600 hover:from-cyan-500 hover:to-sky-500 text-white font-semibold text-xs flex items-center justify-center gap-2 shadow-lg shadow-cyan-900/30 transition-all active:scale-[0.98]">
-            <i data-lucide="download" class="w-4 h-4"></i>
-            <span>Download Decrypted Scan (.dcm)</span>
+            <div class="case-desc">Costophrenic angle blunting</div>
           </button>
-          
-          <button id="shredBtn" onclick="executeCryptoShred()" class="w-full sm:w-auto py-2.5 px-3 rounded-xl bg-surfaceWell hover:bg-rose-950/40 border border-borderSubtle hover:border-rose-500/40 text-slate-300 hover:text-rose-400 text-xs font-medium flex items-center justify-center gap-1.5 transition-all">
-            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
-            <span>Crypto-Shred</span>
+          <button type="button" class="case-btn" data-sample="patient_03_cardiomegaly" onclick="loadSample('patient_03_cardiomegaly')">
+            <div class="case-top">
+              <span class="case-title">Patient 03: Cardiomegaly</span>
+              <span class="badge badge-attention">Elevated</span>
+            </div>
+            <div class="case-desc">CTR &gt; 0.55 cardiac enlargement</div>
           </button>
         </div>
-
       </div>
 
-    </section>
+      <div class="sys-spec">
+        <div class="label" style="margin-bottom: 4px;">Pipeline Profile</div>
+        <div class="sys-row"><span>Backbone</span><span id="modelBackboneText">DenseNet121</span></div>
+        <div class="sys-row"><span>Weights</span><span id="weightsStatusText">TorchXRayVision</span></div>
+        <div class="sys-row"><span>Safe Harbor</span><span>18 HIPAA Identifiers</span></div>
+        <div class="sys-row"><span>Jurisdiction</span><span>HIPAA &amp; DPDP Act</span></div>
+      </div>
+    </nav>
 
-  </main>
+    <!-- Center Focal Stage: Film Viewport + Safe Harbor Matrix -->
+    <main class="main">
+      <div class="viewport-bar">
+        <div class="viewport-tabs" role="tablist" aria-label="Image Plane Mode">
+          <button type="button" role="tab" aria-selected="true" class="viewport-tab active" id="tabRaw" onclick="switchView('raw')">Original [1]</button>
+          <button type="button" role="tab" aria-selected="false" class="viewport-tab" id="tabRedacted" onclick="switchView('redacted')">De-Identified [2]</button>
+          <button type="button" role="tab" aria-selected="false" class="viewport-tab" id="tabHeatmap" onclick="switchView('heatmap')">Grad-CAM [3]</button>
+        </div>
+        <div class="viewport-bar-right">
+          <span class="caption" id="panHint" style="display:none;">Drag to pan</span>
+          <div id="triageBadge"></div>
+        </div>
+      </div>
 
-  <!-- Client-Side Workstation Logic -->
+      <div class="viewport-stage" id="viewportStage">
+        <div class="viewport-placeholder" id="viewportPlaceholder">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+          <span>Select a reference case or upload a chest DICOM to open the reading box</span>
+        </div>
+
+        <div class="film-transform-layer" id="filmTransformLayer" style="display:none;">
+          <div class="film-frame">
+            <img id="mainImg" class="film-img" alt="Thoracic radiograph">
+            <img id="heatmapImg" class="film-heatmap-overlay" alt="Grad-CAM pathology saliency map" style="display:none; opacity: 0.85;">
+          </div>
+        </div>
+
+        <div class="viewport-controls" id="viewportControls" style="display:none;">
+          <div class="ctrl-group">
+            <label for="pathologySelect" class="ctrl-label">Target</label>
+            <select id="pathologySelect" onchange="changeHeatmapPathology()">
+              <option value="Pneumonia">Pneumonia</option>
+              <option value="Cardiomegaly">Cardiomegaly</option>
+              <option value="Pleural Effusion">Pleural Effusion</option>
+              <option value="Pneumothorax">Pneumothorax</option>
+              <option value="Atelectasis">Atelectasis</option>
+            </select>
+          </div>
+          <div class="ctrl-group">
+            <label for="opacitySlider" class="ctrl-label">Heatmap Mix</label>
+            <input type="range" class="opacity-slider" id="opacitySlider" min="0" max="100" value="85" oninput="adjustOpacity(this.value)">
+            <span class="mono caption" id="opacityVal" style="width: 30px; text-align: right;">85%</span>
+          </div>
+          <div class="ctrl-group">
+            <button type="button" class="ctrl-btn" id="invertBtn" onclick="toggleInvert()" title="Invert film polarity (I)" aria-label="Invert film grayscale">Invert</button>
+            <button type="button" class="ctrl-btn" onclick="zoom(1.18)" title="Zoom in (+)" aria-label="Zoom in">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+            </button>
+            <button type="button" class="ctrl-btn" onclick="zoom(0.85)" title="Zoom out (-)" aria-label="Zoom out">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+            </button>
+            <button type="button" class="ctrl-btn" onclick="resetTransform()" title="Reset viewport (0)" aria-label="Reset zoom and pan">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- PII Audit Table -->
+      <section class="pii-section" aria-label="DICOM De-Identification Audit">
+        <div class="pii-section-bar">
+          <div class="h2">DICOM PS 3.15 Safe Harbor Audit</div>
+          <span class="caption" id="redactionBadge">Awaiting ingestion</span>
+        </div>
+        <div class="pii-wrap">
+          <table class="pii-table">
+            <thead>
+              <tr>
+                <th>Tag</th>
+                <th>Attribute</th>
+                <th>Original PHI</th>
+                <th>Post-Ingestion</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="piiBody">
+              <tr><td colspan="5" class="pii-empty">Ingest a study to inspect scrubbed Safe Harbor attributes</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <!-- Right Rail: Diagnostics & Cryptographic Storage -->
+    <aside class="aside" aria-label="Diagnostics and Security Verification">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="h2">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            <span>Diagnostic Triage</span>
+          </div>
+          <span class="mono caption" id="latencyBadge">-- ms</span>
+        </div>
+        <div class="panel-body">
+          <div id="predictionContainer" class="pred-list">
+            <div style="padding: 14px 0; text-align: center; color: var(--text-muted); font-size: 12px;">
+              Awaiting inference
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <div class="h2">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            <span>Envelope Storage</span>
+          </div>
+          <span class="badge badge-verified">FIPS 140-3</span>
+        </div>
+        <div class="panel-body">
+          <div class="metric">
+            <div class="metric-row">
+              <span class="label">Shannon Entropy</span>
+              <span id="entropyTargetBadge" class="badge badge-neutral">Target &ge; 7.99</span>
+            </div>
+            <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 4px;">
+              <span class="value mono" id="entropyValue">--</span>
+              <span class="caption">/ 8.00 bits/byte</span>
+            </div>
+            <div class="entropy-track">
+              <div class="entropy-fill" id="entropyBar" style="width: 0%;"></div>
+            </div>
+          </div>
+
+          <div class="metric">
+            <div class="metric-row">
+              <span class="label">Ciphertext SHA-256</span>
+              <span class="caption" id="copyFeedback">Click digest to copy</span>
+            </div>
+            <button type="button" class="mono-box copy-btn" id="copyShaBtn" onclick="copyHash()" title="Copy SHA-256 digest">--</button>
+          </div>
+
+          <div class="metric">
+            <div class="metric-row">
+              <span class="label">Wire Header (64 B)</span>
+              <span class="mono caption" id="wireSizeLabel">-- B</span>
+            </div>
+            <div class="mono-box" id="hexPreview">--</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top: auto;">
+        <div class="panel-header">
+          <div class="h2">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            <span>Right to Erasure</span>
+          </div>
+          <span class="caption">DPDP Sec. 12</span>
+        </div>
+        <div class="panel-body" style="display: flex; flex-direction: column; gap: 10px;">
+          <div class="caption mono" id="shredStatus">Study key isolated per UID</div>
+          <button type="button" class="shred-btn" id="shredBtn" disabled onclick="armShred()">Crypto-Shred Study</button>
+          <div class="shred-confirm-bar" id="shredConfirmGroup">
+            <button type="button" class="btn-ghost" id="shredCancelBtn" onclick="cancelShred()">Cancel</button>
+            <button type="button" class="btn-danger-solid" id="shredExecuteBtn" onclick="executeShred()">Confirm Destruction</button>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
   <script>
-    let currentStudyData = null;
-    let isHeatmapActive = false;
+    let currentData = null;
+    let currentStudySource = null;
+    let currentView = 'raw';
+    let zoomLevel = 1.0;
+    let panX = 0;
+    let panY = 0;
+    let isPanning = false;
+    let panStartX = 0;
+    let panStartY = 0;
+    let isInverted = false;
 
-    // Toast Notification System
-    function showToast(title, message, type = 'info') {
+    function showToast(title, msg, type) {
       const container = document.getElementById('toastContainer');
-      const toast = document.createElement('div');
-      
-      const typeStyles = {
-        success: 'bg-cardBg border-emerald-500/50 text-emerald-300',
-        error: 'bg-cardBg border-rose-500/50 text-rose-300',
-        warning: 'bg-cardBg border-amber-500/50 text-amber-300',
-        info: 'bg-cardBg border-cyan-500/50 text-cyan-300'
-      };
-
-      const iconName = {
-        success: 'check-circle-2',
-        error: 'alert-triangle',
-        warning: 'alert-circle',
-        info: 'info'
-      }[type] || 'info';
-
-      toast.className = `toast-anim pointer-events-auto p-3.5 rounded-xl border shadow-xl flex items-start gap-3 text-xs ${typeStyles[type] || typeStyles.info}`;
-      toast.innerHTML = `
-        <i data-lucide="${iconName}" class="w-4 h-4 mt-0.5 flex-shrink-0"></i>
-        <div class="flex-1">
-          <p class="font-bold text-white">${title}</p>
-          <p class="text-slate-300 mt-0.5">${message}</p>
-        </div>
-        <button onclick="this.parentElement.remove()" class="text-slate-400 hover:text-white p-0.5"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>
-      `;
-
-      container.appendChild(toast);
-      lucide.createIcons({ root: toast });
-      setTimeout(() => { if (toast.parentElement) toast.remove(); }, 4000);
+      const el = document.createElement('div');
+      el.className = 'toast';
+      el.innerHTML = `<div class="toast-dot ${type}"></div><div class="toast-body"><div class="toast-title"></div><div class="toast-msg"></div></div>`;
+      el.querySelector('.toast-title').textContent = title;
+      el.querySelector('.toast-msg').textContent = msg;
+      container.appendChild(el);
+      setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 200); }, 4200);
     }
 
-    // Defensive API Client
+    function setLoader(show, text) {
+      const l = document.getElementById('loader');
+      if (text) document.getElementById('loaderText').textContent = text;
+      l.classList.toggle('hidden', !show);
+    }
+
     async function safeApiPost(url, formData) {
-      try {
-        const res = await fetch(url, { method: 'POST', body: formData });
-        const rawText = await res.text();
-        let json;
-        try {
-          json = JSON.parse(rawText);
-        } catch {
-          throw new Error(rawText || `Server returned HTTP ${res.status}`);
-        }
-        if (!res.ok) {
-          throw new Error(json.detail || json.message || `HTTP ${res.status} Error`);
-        }
-        return json;
-      } catch (err) {
-        throw err;
-      }
+      const res = await fetch(url, { method: 'POST', body: formData });
+      const raw = await res.text();
+      let json;
+      try { json = JSON.parse(raw); } catch { throw new Error(raw || `Server returned HTTP ${res.status}`); }
+      if (!res.ok) throw new Error(json.detail || json.message || `HTTP ${res.status}`);
+      return json;
     }
 
-    // Drag and drop setup
-    const dropzone = document.getElementById('dropzone');
-    const fileInput = document.getElementById('fileInput');
-
-    dropzone.addEventListener('click', () => fileInput.click());
-    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('border-cyan-400', 'bg-cyan-500/10'); });
-    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('border-cyan-400', 'bg-cyan-500/10'));
-    dropzone.addEventListener('drop', (e) => {
-      e.preventDefault();
-      dropzone.classList.remove('border-cyan-400', 'bg-cyan-500/10');
-      if (e.dataTransfer.files.length > 0) uploadFile(e.dataTransfer.files[0]);
-    });
-
-    fileInput.addEventListener('change', () => {
-      if (fileInput.files.length > 0) uploadFile(fileInput.files[0]);
-    });
-
-    function setLoader(show, text = 'Processing...') {
-      document.getElementById('dropzoneContainer').classList.toggle('hidden', show);
-      document.getElementById('scanStage').classList.add('hidden');
-      document.getElementById('loaderText').innerText = text;
-      document.getElementById('loader').classList.toggle('hidden', !show);
+    function markActiveSampleButton(sampleId) {
+      document.querySelectorAll('.case-btn').forEach(btn => {
+        btn.classList.toggle('is-active', btn.dataset.sample === sampleId);
+      });
     }
 
-    async function loadSample(sampleId) {
-      setLoader(true, 'Sanitizing, Encrypting & Diagnosing Case...');
-      const formData = new FormData();
-      formData.append('sample_id', sampleId);
-      formData.append('pathology_heatmap', document.getElementById('pathologySelect').value || 'Pneumonia');
-
+    async function loadSample(id) {
+      setLoader(true, 'De-identifying, encrypting & analyzing study');
+      const fd = new FormData();
+      fd.append('sample_id', id);
+      fd.append('pathology_heatmap', document.getElementById('pathologySelect').value);
       try {
-        const data = await safeApiPost('/api/v1/dashboard/analyze', formData);
-        renderActiveDashboard(data);
-        showToast('Study Evaluated', `Processed ${data.file_name} with pre-trained TorchXRayVision.`, 'success');
-      } catch (err) {
-        showToast('Ingestion Error', err.message, 'error');
-        resetToUpload();
-      }
+        const data = await safeApiPost('/api/v1/dashboard/analyze', fd);
+        currentStudySource = { type: 'sample', id };
+        markActiveSampleButton(id);
+        render(data);
+        showToast('Study ingested', `${data.file_name} sealed & analyzed`, 'success');
+      } catch (e) { showToast('Ingestion error', e.message, 'error'); }
+      finally { setLoader(false); }
     }
 
     async function uploadFile(file) {
-      const validExts = ['.dcm', '.png', '.jpg', '.jpeg'];
-      const hasValidExt = validExts.some(ext => file.name.toLowerCase().endsWith(ext));
-      if (!hasValidExt) {
-        showToast('Invalid File Type', 'Please upload a DICOM (.dcm) or standard scan (.png, .jpg).', 'warning');
-        return;
-      }
-
-      setLoader(true, `De-identifying & Ingesting ${file.name}...`);
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('pathology_heatmap', document.getElementById('pathologySelect').value || 'Pneumonia');
-
+      const ok = ['.dcm', '.png', '.jpg', '.jpeg'].some(x => file.name.toLowerCase().endsWith(x));
+      if (!ok) { showToast('Unsupported file', 'Upload a .dcm, .png, or .jpg chest radiograph', 'warning'); return; }
+      setLoader(true, `Processing ${file.name}`);
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('pathology_heatmap', document.getElementById('pathologySelect').value);
       try {
-        const data = await safeApiPost('/api/v1/dashboard/analyze', formData);
-        renderActiveDashboard(data);
-        showToast('Upload Successful', `Sealed with AES-256-GCM envelope (${data.security.shannon_entropy_bits_per_byte} bits/byte).`, 'success');
-      } catch (err) {
-        showToast('Upload Failure', err.message, 'error');
-        resetToUpload();
-      }
+        const data = await safeApiPost('/api/v1/dashboard/analyze', fd);
+        currentStudySource = { type: 'file', file };
+        markActiveSampleButton(null);
+        render(data);
+        showToast('Upload complete', `${data.file_name} sealed with AES-256-GCM`, 'success');
+      } catch (e) { showToast('Upload failed', e.message, 'error'); }
+      finally { setLoader(false); }
     }
 
-    function renderActiveDashboard(data) {
-      currentStudyData = data;
-      isHeatmapActive = false;
-      document.getElementById('heatmapToggle').checked = false;
-      document.getElementById('pathologySelectorContainer').classList.add('hidden');
+    function render(data) {
+      currentData = data;
+      resetTransform();
+      cancelShred();
 
-      // 1. Switch Left Card to Active Viewport
-      document.getElementById('loader').classList.add('hidden');
-      document.getElementById('dropzoneContainer').classList.add('hidden');
-      document.getElementById('scanStage').classList.remove('hidden');
-      document.getElementById('resetScanBtn').classList.remove('hidden');
-      document.getElementById('mainScanImg').src = data.images.redacted_image_url;
+      document.getElementById('viewportPlaceholder').style.display = 'none';
+      document.getElementById('filmTransformLayer').style.display = 'flex';
+      document.getElementById('viewportControls').style.display = 'flex';
+      document.getElementById('studyFileLabel').textContent = `${data.file_name} (${data.anonymous_study_instance_uid.substring(0, 18)}...)`;
 
-      // 2. Switch Right Card to Active Content
-      document.getElementById('rightPlaceholder').classList.add('hidden');
-      document.getElementById('rightContent').classList.remove('hidden');
-      document.getElementById('scanFilename').innerText = data.file_name;
+      document.getElementById('pathologySelect').value = data.ai_diagnostics.active_heatmap_pathology;
+      switchView(currentView);
 
-      // 3. Render Top AI Finding
-      const preds = data.ai_diagnostics.predictions || [];
-      const top = preds[0] || { pathology: 'No finding', probability: 0, triage_urgency: 'ROUTINE' };
-      document.getElementById('topFindingName').innerText = top.pathology;
-      
-      const pct = (top.probability * 100).toFixed(1);
-      document.getElementById('topConfidence').innerText = `${pct}%`;
-      document.getElementById('confidenceBar').style.width = `${pct}%`;
+      document.getElementById('weightsHeaderBadge').textContent = data.ai_diagnostics.is_real_weights ? 'Pretrained Clinical Weights' : 'Prototype Weights';
+      document.getElementById('modelBackboneText').textContent = data.ai_diagnostics.model_name;
+      document.getElementById('weightsStatusText').textContent = data.ai_diagnostics.is_real_weights ? 'Verified Real' : 'Fallback';
 
-      // Urgency Triage Badge
-      const urgency = top.triage_urgency || 'ROUTINE';
-      const badge = document.getElementById('triageBadge');
-      if (urgency === 'STAT_CRITICAL') {
-        badge.className = 'text-[10px] font-bold px-2 py-0.5 rounded border bg-rose-500/10 text-rose-400 border-rose-500/30';
-        badge.innerText = 'STAT CRITICAL';
-      } else if (urgency === 'ELEVATED') {
-        badge.className = 'text-[10px] font-bold px-2 py-0.5 rounded border bg-amber-500/10 text-amber-400 border-amber-500/30';
-        badge.innerText = 'ELEVATED TRIAGE';
-      } else {
-        badge.className = 'text-[10px] font-bold px-2 py-0.5 rounded border bg-emerald-500/10 text-emerald-400 border-emerald-500/30';
-        badge.innerText = 'ROUTINE';
-      }
+      const u = data.ai_diagnostics.overall_triage_urgency;
+      const cls = u === 'STAT_CRITICAL' ? 'badge-critical' : u === 'ELEVATED' ? 'badge-attention' : 'badge-verified';
+      document.getElementById('triageBadge').innerHTML = `<span class="badge ${cls}">${u.replace('_', ' ')}</span>`;
 
-      // Secondary Screenings Line
-      const secondaries = preds.slice(1).map(p => `${p.pathology} ${(p.probability * 100).toFixed(0)}%`).join(' &bull; ');
-      document.getElementById('secondaryFindings').innerHTML = secondaries ? `Also screened: ${secondaries}` : '';
+      document.getElementById('latencyBadge').textContent = `${data.ai_diagnostics.inference_latency_ms} ms`;
 
-      // 4. Security Metrics
-      document.getElementById('entropyScore').innerText = `Entropy ${data.security.shannon_entropy_bits_per_byte} / 8.0`;
-      document.getElementById('sha256Digest').innerText = data.security.sha256_hash;
-
-      // 5. Populate DICOM Stripped Tag Table
-      const tagTbody = document.getElementById('tagTableBody');
-      tagTbody.innerHTML = '';
-      (data.deidentification.tag_diff_matrix || []).forEach(row => {
-        tagTbody.innerHTML += `
-          <tr class="hover:bg-surfaceWell/50 transition-colors">
-            <td class="py-1 px-2.5 text-slate-500">${row.tag_hex}</td>
-            <td class="py-1 px-2.5 text-slate-300 font-sans">${row.tag_name}</td>
-            <td class="py-1 px-2.5 text-rose-400/80 truncate max-w-[120px]">${row.original_value}</td>
-            <td class="py-1 px-2.5 text-right font-sans">
-              <span class="px-1.5 py-0.5 rounded text-[9px] font-bold ${row.status === 'SANITIZED' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'text-slate-500'}">
-                ${row.status}
-              </span>
-            </td>
-          </tr>
+      const pc = document.getElementById('predictionContainer');
+      pc.innerHTML = '';
+      const activeTarget = data.ai_diagnostics.active_heatmap_pathology;
+      data.ai_diagnostics.predictions.forEach(p => {
+        const pct = (p.probability * 100).toFixed(1);
+        const fillCls = p.probability >= 0.70 ? 'critical' : p.probability >= 0.45 ? 'elevated' : '';
+        const valColor = p.probability >= 0.70 ? 'var(--accent-critical)' : (p.probability >= 0.45 ? 'var(--accent-attention)' : 'var(--text-primary)');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'pred-row' + (p.pathology === activeTarget ? ' is-focused' : '');
+        btn.title = `Inspect ${p.pathology} Grad-CAM localization`;
+        btn.onclick = () => selectPathologyFromList(p.pathology);
+        btn.innerHTML = `
+          <div class="pred-meta">
+            <span class="pred-label">${p.pathology}</span>
+            <span class="pred-uncertainty">&plusmn;${p.epistemic_uncertainty.toFixed(3)} uncertainty</span>
+          </div>
+          <div class="pred-bar-track"><div class="pred-bar-fill ${fillCls}" style="width: ${pct}%"></div></div>
+          <div class="pred-value" style="color: ${valColor};">${pct}%</div>
         `;
+        pc.appendChild(btn);
       });
 
-      // Enable Shred and Download buttons
-      const shredBtn = document.getElementById('shredBtn');
-      shredBtn.disabled = false;
-      shredBtn.innerHTML = `<i data-lucide="trash-2" class="w-3.5 h-3.5"></i><span>Crypto-Shred</span>`;
-
-      lucide.createIcons();
-    }
-
-    function resetToUpload() {
-      currentStudyData = null;
-      document.getElementById('fileInput').value = '';
-      document.getElementById('dropzoneContainer').classList.remove('hidden');
-      document.getElementById('scanStage').classList.add('hidden');
-      document.getElementById('resetScanBtn').classList.add('hidden');
-      document.getElementById('loader').classList.add('hidden');
-      document.getElementById('rightContent').classList.add('hidden');
-      document.getElementById('rightPlaceholder').classList.remove('hidden');
-      document.getElementById('scanFilename').innerText = 'Awaiting study';
-    }
-
-    function onToggleHeatmap(enabled) {
-      if (!currentStudyData) return;
-      isHeatmapActive = enabled;
-      const img = document.getElementById('mainScanImg');
-      const selector = document.getElementById('pathologySelectorContainer');
-
-      if (enabled) {
-        img.src = currentStudyData.images.gradcam_heatmap_url;
-        selector.classList.remove('hidden');
+      const ent = data.security.shannon_entropy_bits_per_byte;
+      document.getElementById('entropyValue').textContent = ent.toFixed(5);
+      document.getElementById('entropyBar').style.width = `${Math.min(100, (ent / 8.0) * 100)}%`;
+      const entBadge = document.getElementById('entropyTargetBadge');
+      if (ent >= 7.99) {
+        entBadge.className = 'badge badge-verified';
+        entBadge.textContent = 'Randomness Passed';
       } else {
-        img.src = currentStudyData.images.redacted_image_url;
-        selector.classList.add('hidden');
+        entBadge.className = 'badge badge-attention';
+        entBadge.textContent = 'Below 7.99';
       }
-    }
 
-    async function changeHeatmapTarget() {
-      if (!currentStudyData) return;
-      const target = document.getElementById('pathologySelect').value;
-      const formData = new FormData();
-      formData.append('sample_id', currentStudyData.file_name.replace('.dcm', '').replace('.png', ''));
-      formData.append('pathology_heatmap', target);
+      document.getElementById('copyShaBtn').textContent = data.security.sha256_hash;
+      document.getElementById('copyFeedback').textContent = 'Click digest to copy';
+      document.getElementById('hexPreview').textContent = data.security.hex_preview_64b;
+      document.getElementById('wireSizeLabel').textContent = `${data.security.storage_file_size_bytes.toLocaleString()} B`;
 
-      try {
-        const data = await safeApiPost('/api/v1/dashboard/analyze', formData);
-        currentStudyData.images.gradcam_heatmap_url = data.images.gradcam_heatmap_url;
-        if (isHeatmapActive) {
-          document.getElementById('mainScanImg').src = data.images.gradcam_heatmap_url;
-        }
-        showToast('Grad-CAM Updated', `Heatmap recalculated for ${target}.`, 'info');
-      } catch (err) {
-        showToast('Heatmap Error', err.message, 'error');
-      }
-    }
-
-    function toggleAuditDrawer() {
-      const drawer = document.getElementById('auditDrawer');
-      const chevron = document.getElementById('drawerChevron');
-      const isHidden = drawer.classList.contains('hidden');
-      drawer.classList.toggle('hidden', !isHidden);
-      chevron.style.transform = isHidden ? 'rotate(180deg)' : 'rotate(0deg)';
-    }
-
-    function copyDigest() {
-      if (!currentStudyData) return;
-      navigator.clipboard.writeText(currentStudyData.security.sha256_hash);
-      showToast('Copied', 'SHA-256 ciphertext hash copied to clipboard.', 'info');
-    }
-
-    function downloadDecryptedScan() {
-      if (!currentStudyData) return;
-      const uid = currentStudyData.anonymous_study_instance_uid;
-      // Trigger direct download from the dedicated backend endpoint
-      window.location.href = `/api/v1/dashboard/download/${uid}`;
-      showToast('Downloading Scan', 'Decrypted sanitized study is downloading.', 'info');
-    }
-
-    async function executeCryptoShred() {
-      if (!currentStudyData) return;
-      const uid = currentStudyData.anonymous_study_instance_uid;
       const shredBtn = document.getElementById('shredBtn');
+      shredBtn.style.display = 'block';
+      shredBtn.disabled = false;
+      document.getElementById('shredStatus').textContent = `Key: ${data.security.kms_master_key_id.slice(-22)}`;
 
-      try {
-        const res = await fetch(`/api/v1/dashboard/shred/${uid}`, { method: 'POST' });
-        const rawText = await res.text();
-        let data;
-        try { data = JSON.parse(rawText); } catch { throw new Error(rawText || `HTTP ${res.status}`); }
+      document.getElementById('redactionBadge').innerHTML = data.deidentification.burned_in_text_redacted
+        ? '<span class="badge badge-verified">Burned-in pixel PHI redacted</span>'
+        : '<span class="badge badge-neutral">No burned-in pixel PHI detected</span>';
 
-        if (res.ok) {
-          shredBtn.disabled = true;
-          shredBtn.innerHTML = `<span class="text-rose-400 font-bold">&check; Shredded</span>`;
-          showToast('Crypto-Shredding Verified', 'Study KEK destroyed. Ciphertext is mathematically irreversible.', 'success');
-        } else {
-          showToast('Shred Failure', data.detail || 'Failed to shred study', 'error');
-        }
-      } catch (err) {
-        showToast('Network Error', err.message, 'error');
+      const tbody = document.getElementById('piiBody');
+      tbody.innerHTML = '';
+      data.deidentification.tag_diff_matrix.forEach(r => {
+        const scrubbed = r.status === 'SANITIZED';
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="mono caption"></td>
+          <td style="font-size:11px; font-weight:500;"></td>
+          <td class="val-original"></td>
+          <td class="val-sanitized"></td>
+          <td><span class="badge ${scrubbed ? 'badge-verified' : 'badge-neutral'}"></span></td>
+        `;
+        tr.children[0].textContent = r.tag_hex;
+        tr.children[1].textContent = r.tag_name;
+        tr.children[2].textContent = r.original_value;
+        tr.children[3].textContent = r.sanitized_value;
+        tr.children[4].firstElementChild.textContent = r.status;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function switchView(view) {
+      currentView = view;
+      const tabs = { raw: 'tabRaw', redacted: 'tabRedacted', heatmap: 'tabHeatmap' };
+      Object.entries(tabs).forEach(([k, id]) => {
+        const el = document.getElementById(id);
+        const active = k === view;
+        el.classList.toggle('active', active);
+        el.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+
+      if (!currentData) return;
+      const baseImg = document.getElementById('mainImg');
+      const hmImg = document.getElementById('heatmapImg');
+
+      if (view === 'raw') {
+        baseImg.src = currentData.images.raw_image_url;
+        hmImg.style.display = 'none';
+      } else if (view === 'redacted') {
+        baseImg.src = currentData.images.redacted_image_url;
+        hmImg.style.display = 'none';
+      } else {
+        baseImg.src = currentData.images.redacted_image_url;
+        hmImg.src = currentData.images.gradcam_heatmap_url;
+        hmImg.style.display = 'block';
+        hmImg.style.opacity = (document.getElementById('opacitySlider').value / 100).toString();
       }
     }
 
-    // Initialize Lucide icons on DOM ready
-    lucide.createIcons();
+    async function selectPathologyFromList(pathology) {
+      document.getElementById('pathologySelect').value = pathology;
+      currentView = 'heatmap';
+      await changeHeatmapPathology();
+    }
+
+    async function changeHeatmapPathology() {
+      if (!currentData || !currentStudySource) return;
+      const selected = document.getElementById('pathologySelect').value;
+      setLoader(true, `Computing Grad-CAM for ${selected}`);
+
+      const fd = new FormData();
+      if (currentStudySource.type === 'sample') {
+        fd.append('sample_id', currentStudySource.id);
+      } else {
+        fd.append('file', currentStudySource.file);
+      }
+      fd.append('pathology_heatmap', selected);
+
+      try {
+        const data = await safeApiPost('/api/v1/dashboard/analyze', fd);
+        currentData.images.gradcam_heatmap_url = data.images.gradcam_heatmap_url;
+        currentData.ai_diagnostics.active_heatmap_pathology = data.ai_diagnostics.active_heatmap_pathology;
+
+        document.querySelectorAll('.pred-row').forEach(btn => {
+          const label = btn.querySelector('.pred-label').textContent;
+          btn.classList.toggle('is-focused', label === selected);
+        });
+
+        switchView('heatmap');
+        showToast('Grad-CAM updated', `Localized ${selected}`, 'info');
+      } catch (e) { showToast('Heatmap error', e.message, 'error'); }
+      finally { setLoader(false); }
+    }
+
+    function applyTransform() {
+      const layer = document.getElementById('filmTransformLayer');
+      const stage = document.getElementById('viewportStage');
+      const panHint = document.getElementById('panHint');
+      layer.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomLevel})`;
+      const zoomed = zoomLevel > 1.05;
+      stage.classList.toggle('can-pan', zoomed);
+      panHint.style.display = zoomed ? 'inline' : 'none';
+    }
+
+    function zoom(factor) {
+      zoomLevel = Math.max(0.6, Math.min(4.0, zoomLevel * factor));
+      if (zoomLevel <= 1.0) { panX = 0; panY = 0; }
+      applyTransform();
+    }
+
+    function resetTransform() {
+      zoomLevel = 1.0;
+      panX = 0;
+      panY = 0;
+      isInverted = false;
+      document.getElementById('mainImg').classList.remove('inverted');
+      document.getElementById('invertBtn').classList.remove('is-active');
+      applyTransform();
+    }
+
+    function toggleInvert() {
+      isInverted = !isInverted;
+      document.getElementById('mainImg').classList.toggle('inverted', isInverted);
+      document.getElementById('invertBtn').classList.toggle('is-active', isInverted);
+    }
+
+    function adjustOpacity(v) {
+      document.getElementById('opacityVal').textContent = v + '%';
+      document.getElementById('heatmapImg').style.opacity = (v / 100).toString();
+    }
+
+    function copyHash() {
+      if (!currentData) return;
+      navigator.clipboard.writeText(currentData.security.sha256_hash);
+      document.getElementById('copyFeedback').textContent = 'Copied to clipboard';
+      showToast('Copied', 'SHA-256 digest copied', 'info');
+    }
+
+    function armShred() {
+      if (!currentData) return;
+      document.getElementById('shredBtn').style.display = 'none';
+      document.getElementById('shredConfirmGroup').classList.add('is-armed');
+    }
+
+    function cancelShred() {
+      document.getElementById('shredConfirmGroup').classList.remove('is-armed');
+      document.getElementById('shredBtn').style.display = 'block';
+    }
+
+    async function executeShred() {
+      if (!currentData) return;
+      setLoader(true, 'Overwriting study KEK (DPDP Sec. 12)');
+      try {
+        const res = await fetch(`/api/v1/dashboard/shred/${currentData.anonymous_study_instance_uid}`, { method: 'POST' });
+        const raw = await res.text();
+        let data;
+        try { data = JSON.parse(raw); } catch { throw new Error(raw || `HTTP ${res.status}`); }
+        if (res.ok) {
+          cancelShred();
+          document.getElementById('shredBtn').disabled = true;
+          document.getElementById('shredStatus').innerHTML = '<span style="color: var(--accent-critical); font-weight: 600;">Crypto-shredded. Study KEK destroyed.</span>';
+          showToast('Erasure verified', 'Study key material permanently destroyed', 'success');
+        } else {
+          showToast('Erasure failed', data.detail || 'Could not shred study', 'error');
+        }
+      } catch (e) { showToast('Network error', e.message, 'error'); }
+      finally { setLoader(false); }
+    }
+
+    const dz = document.getElementById('dropzone');
+    const fi = document.getElementById('fileInput');
+    dz.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fi.click(); } });
+    dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+    dz.addEventListener('dragleave', () => dz.classList.remove('dragover'));
+    dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('dragover'); if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]); });
+    fi.addEventListener('change', () => { if (fi.files[0]) uploadFile(fi.files[0]); });
+
+    const stage = document.getElementById('viewportStage');
+    stage.addEventListener('mousedown', e => {
+      if (!currentData || zoomLevel <= 1.05 || e.target.closest('.viewport-controls')) return;
+      isPanning = true;
+      panStartX = e.clientX - panX;
+      panStartY = e.clientY - panY;
+      stage.classList.add('is-panning');
+    });
+    window.addEventListener('mousemove', e => {
+      if (!isPanning) return;
+      panX = e.clientX - panStartX;
+      panY = e.clientY - panStartY;
+      applyTransform();
+    });
+    window.addEventListener('mouseup', () => {
+      if (!isPanning) return;
+      isPanning = false;
+      stage.classList.remove('is-panning');
+    });
+    stage.addEventListener('wheel', e => {
+      if (!currentData) return;
+      e.preventDefault();
+      zoom(e.deltaY < 0 ? 1.1 : 0.9);
+    }, { passive: false });
+
+    window.addEventListener('keydown', e => {
+      if (!currentData || ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+      if (e.key === '1') switchView('raw');
+      else if (e.key === '2') switchView('redacted');
+      else if (e.key === '3') switchView('heatmap');
+      else if (e.key === 'i' || e.key === 'I') toggleInvert();
+      else if (e.key === '+' || e.key === '=') zoom(1.15);
+      else if (e.key === '-') zoom(0.85);
+      else if (e.key === '0') resetTransform();
+    });
   </script>
 </body>
 </html>
