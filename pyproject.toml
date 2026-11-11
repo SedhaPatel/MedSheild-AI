@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "medshield-ai"
+version = "0.1.0"
+description = "Secure, HIPAA and India DPDP-compliant Medical Image Disease Detection System"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.28.0",
+    "pydicom>=2.4.0",
+    "cryptography>=42.0.0",
+    "numpy>=1.24.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "pillow>=9.5.0",
+    "opencv-python-headless>=4.8.0",
+    "easyocr>=1.7.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "httpx>=0.24.0",
+    "coverage>=7.3.0"
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+pydicom
+cryptography
+pydantic
+pydantic-settings
+torch
+torchvision
+numpy
+pillow
+httpx
+pytest
+pytest-asyncio
