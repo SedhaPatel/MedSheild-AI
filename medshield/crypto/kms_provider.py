@@ -53,8 +53,9 @@ class LocalKMSProvider(KMSProvider):
 
     def generate_data_key(self, key_id: str) -> Tuple[bytes, bytes]:
         if key_id not in self._keys:
-            # Auto-provision if default alias requested
-            self.create_master_key(key_id.split("/")[-1])
+            # Auto-provision if requested
+            self._keys[key_id] = AESGCM.generate_key(bit_length=256)
+            self._revoked[key_id] = False
             
         if self._revoked.get(key_id, False):
             raise KeyRevokedError(f"Master key {key_id} has been revoked (Crypto-Shredded)")
