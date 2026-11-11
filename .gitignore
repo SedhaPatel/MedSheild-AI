@@ -9,5 +9,7 @@ build/
 *.egg-info/
 .env
 .superpowers/
+.agents/
+skills-lock.json
 /storage/
 tests/test_data/
