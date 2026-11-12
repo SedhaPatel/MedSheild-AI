@@ -33,6 +33,21 @@ function matchesFilter(entry: WorklistEntry, filter: Filter) {
   return !entry.is_shredded && entry.overall_triage_urgency === filter
 }
 
+/**
+ * Case-insensitive match on file name, modality, UID, and the top finding. The finding only matches
+ * when it is positive, so searching "pneumonia" does not return studies whose result is negative.
+ */
+function matchesQuery(entry: WorklistEntry, q: string) {
+  if (!q) return true
+  const positiveFinding = !entry.is_shredded && entry.top_probability >= SCORE_THRESHOLD
+  return (
+    entry.file_name.toLowerCase().includes(q) ||
+    entry.modality.toLowerCase().includes(q) ||
+    entry.anonymous_study_instance_uid.includes(q) ||
+    (positiveFinding && entry.top_pathology.toLowerCase().includes(q))
+  )
+}
+
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' })
 
 function ResultCell({ entry }: { entry: WorklistEntry }) {
@@ -59,22 +74,15 @@ export function StudiesPage() {
   const [filter, setFilter] = useState<Filter>('ALL')
   const [query, setQuery] = useState('')
 
-  const rows = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return worklist.filter(
-      (e) =>
-        matchesFilter(e, filter) &&
-        (!q ||
-          e.file_name.toLowerCase().includes(q) ||
-          e.top_pathology.toLowerCase().includes(q) ||
-          e.anonymous_study_instance_uid.includes(q))
-    )
-  }, [worklist, filter, query])
-
+  const q = query.trim().toLowerCase()
+  // Tab counts reflect the current search, so "All 1" means one study matches it
+  const searched = useMemo(() => worklist.filter((e) => matchesQuery(e, q)), [worklist, q])
+  const rows = useMemo(() => searched.filter((e) => matchesFilter(e, filter)), [searched, filter])
   const counts = useMemo(
-    () => Object.fromEntries(FILTERS.map((f) => [f.value, worklist.filter((e) => matchesFilter(e, f.value)).length])),
-    [worklist]
+    () => Object.fromEntries(FILTERS.map((f) => [f.value, searched.filter((e) => matchesFilter(e, f.value)).length])),
+    [searched]
   )
+  const activeFilterLabel = FILTERS.find((f) => f.value === filter)?.label ?? 'All'
 
   return (
     <div className="flex flex-1 flex-col xl:h-screen xl:overflow-hidden">
@@ -88,7 +96,7 @@ export function StudiesPage() {
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search file, finding or UID"
+              placeholder="Search file, finding, modality or UID"
               aria-label="Search studies"
               className="h-8 w-64 rounded-[var(--control-radius)] border border-border-strong bg-bg-panel pr-3 pl-8 text-[13px] placeholder:text-text-muted focus-visible:outline-2 focus-visible:outline-border-focus"
             />
@@ -159,7 +167,9 @@ export function StudiesPage() {
                     <TableCell colSpan={4} className="px-6 py-10 text-center text-text-muted">
                       {worklist.length === 0
                         ? 'No studies yet. Upload a chest X-ray or load a sample above.'
-                        : 'No studies match this filter.'}
+                        : q
+                          ? `No studies match “${query.trim()}”${filter === 'ALL' ? '' : ` in ${activeFilterLabel}`}.`
+                          : `No ${activeFilterLabel.toLowerCase()} studies.`}
                     </TableCell>
                   </TableRow>
                 ) : (
