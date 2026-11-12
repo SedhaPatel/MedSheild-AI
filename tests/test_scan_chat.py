@@ -886,4 +886,97 @@ def test_ollama_local_provider_dispatch_and_fallback(monkeypatch, tmp_path):
     assert fb_data["zero_pii_verified"] is True
 
 
+def test_synthesize_offline_grounded_reply_infection_routes_to_pathology():
+    predictions = [
+        {"pathology": "Pneumonia", "probability": 0.68, "epistemic_uncertainty": 0.025, "triage_urgency": "ELEVATED"},
+        {"pathology": "Cardiomegaly", "probability": 0.15, "epistemic_uncertainty": 0.012, "triage_urgency": "ROUTINE"},
+    ]
+    reply = synthesize_offline_grounded_reply(
+        user_message="Is there an infection?",
+        predictions=predictions,
+        target_pathology="Pneumonia",
+    )
+    # Must route to pathology assessment, NOT clinical next steps
+    assert "Targeted Pathology Assessment: Pneumonia" in reply
+    assert "Recommended Clinical Next Steps" not in reply
+    assert "Pneumonia" in reply
+
+
+def test_synthesize_offline_grounded_reply_ordered_does_not_trigger_heatmap():
+    predictions = [
+        {"pathology": "Pneumonia", "probability": 0.65, "epistemic_uncertainty": 0.02, "triage_urgency": "ELEVATED"},
+    ]
+    reply = synthesize_offline_grounded_reply(
+        user_message="Should a follow-up X-ray be ordered?",
+        predictions=predictions,
+        target_pathology="Pneumonia",
+    )
+    # "ordered" must not trigger "red" substring matching in heatmap mode
+    assert "Visual Explainability & Spatial Saliency Analysis" not in reply
+    assert "Recommended Clinical Next Steps & Diagnostic Workup" in reply
+
+
+def test_synthesize_offline_grounded_reply_elevated_urgency_guidance():
+    predictions = [
+        {"pathology": "Pneumothorax", "probability": 0.58, "epistemic_uncertainty": 0.03, "triage_urgency": "ELEVATED"},
+    ]
+    reply = synthesize_offline_grounded_reply(
+        user_message="Next recommended clinical steps",
+        predictions=predictions,
+        target_pathology="Pneumothorax",
+    )
+    assert "Recommended Clinical Next Steps & Diagnostic Workup" in reply
+    assert "ELEVATED" in reply
+    assert "elective" not in reply.lower()
+    assert any(term in reply.lower() for term in ["expedited", "elevated"])
+
+
+def test_chat_service_auto_provider_clean_fallback_from_unset_keys(monkeypatch, tmp_path):
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    monkeypatch.setenv("HF_API_TOKEN", "")
+
+    ds = make_compliant_dicom(burned_in="NO")
+    predictions = [
+        {"pathology": "Pneumonia", "probability": 0.85, "epistemic_uncertainty": 0.015, "triage_urgency": "STAT_CRITICAL"},
+    ]
+    settings = Settings(
+        storage_path=str(tmp_path / "enc"),
+        secret_pepper=b"test-salt-auto-provider",
+        require_mtls=False,
+        chat_provider="auto",
+        gemini_api_key="",
+        hf_api_token="",
+        ollama_base_url="http://127.0.0.1:59999",  # non-running Ollama port
+    )
+    service = ScanChatService(settings=settings)
+    reply = asyncio.run(service.generate_reply(
+        dataset=ds,
+        user_message="Next recommended clinical steps",
+        predictions=predictions,
+        target_pathology="Pneumonia",
+        conversation_history=[],
+    ))
+    assert reply["provider_used"] == "grounded-local-fallback"
+    assert "Recommended Clinical Next Steps" in reply["answer"]
+    assert reply["zero_pii_verified"] is True
+    assert reply["medical_disclaimer"]
+
+
+def test_extract_scan_telemetry_signed_pixel_representation():
+    ds = make_compliant_dicom(burned_in="NO")
+    ds.PixelRepresentation = 1
+    # Signed 16-bit array with negative values (-1000 to 1000)
+    arr = np.linspace(-1000, 1000, 128 * 128, dtype=np.int16).reshape(128, 128)
+    ds.PixelData = arr.tobytes()
+
+    telemetry = extract_scan_telemetry(ds)
+    assert telemetry["rows"] == 128
+    assert telemetry["cols"] == 128
+    assert telemetry["left_vs_right_asymmetry"]["ratio"] >= 0.0
+    assert telemetry["vertical_density"]["upper_to_lower_ratio"] >= 0.0
+    assert not np.isnan(telemetry["left_vs_right_asymmetry"]["ratio"])
+    assert not np.isinf(telemetry["left_vs_right_asymmetry"]["ratio"])
+
+
+
 

@@ -107,7 +107,7 @@ class TorchXRayVisionClassifier(nn.Module):
         model_meta = getattr(xrv.models, "model_urls", {}).get("densenet121-res224-all", {})
         if "op_threshs" in model_meta and getattr(self.model, "op_threshs", None) is None:
             self.model.op_threshs = torch.tensor(model_meta["op_threshs"], dtype=torch.float32)
-        if "input_resolution" in model_meta and not hasattr(self.model, "input_resolution"):
+        if "input_resolution" in model_meta and getattr(self.model, "input_resolution", None) is None:
             self.model.input_resolution = model_meta["input_resolution"]
         if "labels" in model_meta:
             self.model.targets = model_meta["labels"]

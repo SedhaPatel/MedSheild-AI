@@ -66,6 +66,15 @@ def test_preprocessor_monochrome1_inversion():
     # Inverted monochrome1 should be normalized similarly to monochrome2
     assert t_mono1.shape == t_mono2.shape
 
+    # XRV normalization mode check
+    xrv_preprocessor = DICOMPreprocessor(target_size=(224, 224), normalization="xrv")
+    t_xrv_mono2, pil_mono2 = xrv_preprocessor.process(ds_mono2)
+    t_xrv_mono1, pil_mono1 = xrv_preprocessor.process(ds_mono1)
+    assert t_xrv_mono1.shape == t_xrv_mono2.shape == (1, 3, 224, 224)
+    assert t_xrv_mono1.min().item() >= -1024.0 - 1e-4
+    assert t_xrv_mono1.max().item() <= 1024.0 + 1e-4
+    assert pil_mono1.size == (224, 224)
+
 def test_model_forward_pass_predictions():
     model = build_thoracic_model(pretrained=False)
     model.eval()

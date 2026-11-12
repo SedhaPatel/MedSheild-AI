@@ -123,16 +123,26 @@ def extract_scan_telemetry(dataset: Dataset) -> Dict[str, Any]:
     # Left vs Right hemithorax brightness asymmetry
     # In radiology: viewer-left is patient right, viewer-right is patient left
     w_mid = max(1, w // 2)
+    ptp = float(np.ptp(arr))
+    if ptp > 1e-6:
+        norm_01 = (arr - arr.min()) / ptp
+    else:
+        norm_01 = np.zeros_like(arr)
+
     viewer_left_mean = float(np.mean(arr[:, :w_mid]))
     viewer_right_mean = float(np.mean(arr[:, w_mid:]))
-    asymmetry_ratio = float(viewer_right_mean / (viewer_left_mean + 1e-6))
+    norm_left_mean = float(np.mean(norm_01[:, :w_mid]))
+    norm_right_mean = float(np.mean(norm_01[:, w_mid:]))
+    asymmetry_ratio = float(norm_right_mean / (norm_left_mean + 1e-6))
 
     # Upper / Mid / Lower vertical optical density
     h_tier = max(1, h // 3)
     upper_mean = float(np.mean(arr[:h_tier, :]))
     mid_mean = float(np.mean(arr[h_tier:2 * h_tier, :]))
     lower_mean = float(np.mean(arr[2 * h_tier:, :]))
-    upper_to_lower = float(upper_mean / (lower_mean + 1e-6))
+    norm_upper_mean = float(np.mean(norm_01[:h_tier, :]))
+    norm_lower_mean = float(np.mean(norm_01[2 * h_tier:, :]))
+    upper_to_lower = float(norm_upper_mean / (norm_lower_mean + 1e-6))
 
     return {
         "rows": int(h),
@@ -408,24 +418,39 @@ def synthesize_offline_grounded_reply(
 
     q_lower = user_message.lower()
 
-    # Detect specific pathology inquiries
+    # Detect specific pathology inquiries with word boundaries
     queried_pathology = None
-    if "pneumothorax" in q_lower or "tension" in q_lower or "air leak" in q_lower or "collapsed lung" in q_lower:
+    if re.search(r"\b(?:pneumothorax|tension|air\s*leak|collapsed\s*lung)\b", q_lower):
         queried_pathology = "Pneumothorax"
-    elif "pneumonia" in q_lower or "consolidation" in q_lower or "infiltrate" in q_lower or "infection" in q_lower:
+    elif re.search(r"\b(?:pneumonia|consolidation|infiltrate|infection)\b", q_lower):
         queried_pathology = "Pneumonia"
-    elif "cardiomegaly" in q_lower or "heart" in q_lower or "cardiac" in q_lower or "enlarged heart" in q_lower:
+    elif re.search(r"\b(?:cardiomegaly|heart|cardiac|enlarged\s*heart)\b", q_lower):
         queried_pathology = "Cardiomegaly"
-    elif "effusion" in q_lower or "fluid" in q_lower or "pleural" in q_lower or "costophrenic" in q_lower:
+    elif re.search(r"\b(?:effusion|fluid|pleural|costophrenic)\b", q_lower):
         queried_pathology = "Pleural Effusion"
-    elif "atelectasis" in q_lower or "volume loss" in q_lower:
+    elif re.search(r"\b(?:atelectasis|volume\s*loss)\b", q_lower):
         queried_pathology = "Atelectasis"
 
-    # Intent routing
-    is_heatmap_query = any(k in q_lower for k in ("heatmap", "highlight", "where", "zone", "region", "red", "grad-cam", "gradcam", "saliency", "localization", "focus"))
-    is_steps_query = any(k in q_lower for k in ("next", "step", "recommend", "workup", "action", "ct", "follow", "triage", "management", "protocol"))
-    is_simple_query = any(k in q_lower for k in ("simple", "plain", "layman", "patient", "everyday", "clear", "means that", "in simple terms", "easy to understand")) or ("explain" in q_lower and not is_heatmap_query and not is_steps_query)
-    is_differential_query = any(k in q_lower for k in ("uncertain", "sure", "compare", "differential", "normal", "other", "confidence", "reliability", "epistemic"))
+    # Intent routing with word-boundary matching for short/ambiguous tokens
+    is_heatmap_query = bool(re.search(
+        r"\b(?:heatmap|highlights?|where|zones?|regions?|red|spots?|grad-?cam|saliency|localization|focus)\b",
+        q_lower,
+    ))
+    is_steps_query = bool(re.search(
+        r"\b(?:next|steps?|recommend\w*|workup|actions?|ct|follow(?:-up)?|triage|management|protocols?)\b",
+        q_lower,
+    ))
+    is_simple_query = bool(re.search(
+        r"\b(?:simple|plain|layman|patient|everyday|clear|mean(?:s|ing)?|why)\b",
+        q_lower,
+    )) or any(phrase in q_lower for phrase in (
+        "in simple terms", "easy to understand", "means that", "in plain english", "in plain language"
+    )) or ("explain" in q_lower and not is_heatmap_query and not is_steps_query)
+
+    is_differential_query = bool(re.search(
+        r"\b(?:uncertain\w*|sure|compare\w*|differential|normal|other|confidence|reliability|epistemic)\b",
+        q_lower,
+    ))
 
     # Build specialized reply sections
     if is_heatmap_query:
@@ -447,17 +472,23 @@ In thoracic imaging, focal saliency in this region corresponds to parenchyma, br
 {findings_block}"""
 
     elif is_steps_query:
-        urgency = target_info['triage_urgency']
-        ct_recommendation = (
-            "Urgent non-contrast high-resolution chest CT (HRCT)"
-            if urgency in ("STAT_CRITICAL", "URGENT")
-            else "Elective or follow-up chest CT if symptoms persist"
-        )
+        urgency = target_info.get('triage_urgency', 'ROUTINE')
+        if urgency in ("STAT_CRITICAL", "URGENT"):
+            ct_recommendation = "Urgent non-contrast high-resolution chest CT (HRCT) with immediate clinician overread"
+            clinical_guidance = "Immediate emergency/STAT triage priority. Urgent attending clinician evaluation required."
+        elif urgency == "ELEVATED":
+            ct_recommendation = "Expedited high-resolution chest CT (HRCT) or contrast-enhanced thoracic imaging within 24–48 hours"
+            clinical_guidance = "Elevated triage priority. Arrange expedited diagnostic correlation and close clinical monitoring."
+        else:
+            ct_recommendation = "Elective or follow-up chest CT if symptoms persist"
+            clinical_guidance = "Routine clinical priority. Standard outpatient monitoring and elective follow-up if symptoms persist."
+
         reply = f"""**Recommended Clinical Next Steps & Diagnostic Workup**
 
 **Triage Priority Classification:**
 - **Target Condition**: **{target_info['pathology']}** ({target_info['probability'] * 100:.1f}% calibrated probability)
 - **Triage Urgency Level**: **{urgency}** (Epistemic uncertainty: ±{target_info['epistemic_uncertainty']:.4f})
+- **Priority Clinical Guidance**: {clinical_guidance}
 
 **Recommended Clinical Action Plan:**
 1. **Confirmatory Imaging & Workup**:
@@ -623,7 +654,8 @@ class ScanChatService:
     """
     Zero-PII clinical VLM chat orchestration service.
     Coordinates Safe Harbor dataset validation, prompt PII scrubbing,
-    and multimodal VLM integration (Gemini 2.5 Flash / MedGemma / offline fallback).
+    and multimodal VLM integration (Gemini 2.5 Flash, MedGemma, local Ollama,
+    and local telemetry/question-aware grounded fallback).
     """
     def __init__(self, settings: Optional[Settings] = None):
         self.settings = settings
