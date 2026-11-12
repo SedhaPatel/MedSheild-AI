@@ -148,3 +148,44 @@ def test_metadata_anonymizer_removes_hipaa_safe_harbor():
     assert anonymized.PatientIdentityRemoved == "YES"
     assert "PS 3.15" in anonymized.DeidentificationMethod
 
+
+
+def test_datetime_and_all_date_elements_are_shifted():
+    ds = create_sample_dicom()
+    ds.AcquisitionDateTime = "20260315143000.123456+0530"
+    ds.PerformedProcedureStepStartDate = "20260315"
+    anon = anonymize_dicom_metadata(ds, secret_salt=b"salt-dt")
+    offset = compute_patient_day_offset(ds.PatientID, b"salt-dt")
+    from datetime import datetime, timedelta
+    expected = (datetime(2026, 3, 15) + timedelta(days=offset)).strftime("%Y%m%d")
+    assert str(anon.AcquisitionDateTime) == expected + "143000.123456+0530"
+    assert str(anon.PerformedProcedureStepStartDate) == expected
+    assert str(anon.StudyDate) == expected
+
+
+def test_all_instance_uids_pseudonymized_consistently_and_class_uids_kept():
+    ds = create_sample_dicom()
+    ds.FrameOfReferenceUID = "1.2.840.113619.2.55.3.6046883.849.5555"
+    ref = Dataset()
+    ref.ReferencedSOPClassUID = "1.2.840.10008.5.1.4.1.1.1"
+    ref.ReferencedSOPInstanceUID = ds.SOPInstanceUID
+    ds.ReferencedImageSequence = Sequence([ref])
+
+    anon = anonymize_dicom_metadata(ds, secret_salt=b"salt-uid")
+
+    assert anon.FrameOfReferenceUID.startswith("2.25.")
+    ref_out = anon.ReferencedImageSequence[0]
+    # Reference inside the sequence still points at the (pseudonymized) instance
+    assert ref_out.ReferencedSOPInstanceUID == anon.SOPInstanceUID
+    # Standard class UIDs and transfer syntax are untouched
+    assert ref_out.ReferencedSOPClassUID == "1.2.840.10008.5.1.4.1.1.1"
+    assert anon.SOPClassUID == "1.2.840.10008.5.1.4.1.1.1"
+    assert anon.file_meta.TransferSyntaxUID == ExplicitVRLittleEndian
+    assert anon.file_meta.MediaStorageSOPInstanceUID == anon.SOPInstanceUID
+
+
+def test_empty_patient_id_does_not_crash():
+    ds = create_sample_dicom()
+    ds.PatientID = ""
+    anon = anonymize_dicom_metadata(ds, secret_salt=b"salt-empty")
+    assert anon.PatientID.startswith("ANON_")
