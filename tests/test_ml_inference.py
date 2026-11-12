@@ -116,7 +116,21 @@ def test_inference_engine_end_to_end():
         assert 0.0 <= pred["probability"] <= 1.0
         assert "triage_urgency" in pred
         assert pred["triage_urgency"] in ["STAT_CRITICAL", "ELEVATED", "ROUTINE"]
-        assert "epistemic_uncertainty" in pred
+        assert pred["is_positive"] == (pred["probability"] >= 0.5)
+        assert 0.0 <= pred["raw_score"] <= 1.0
+        assert 0.0 < pred["operating_threshold"] < 1.0
+    assert "not a calibrated probability" in result["score_semantics"]
+
+
+def test_scores_are_threshold_normalized_for_torchxrayvision():
+    """0.5 must coincide with the model's operating threshold on the raw sigmoid output."""
+    import pydicom
+    engine = InferenceEngine()
+    for sample in ("patient_01_pneumonia", "patient_03_cardiomegaly"):
+        for pred in engine.predict(pydicom.dcmread(f"test_samples/{sample}.dcm"))["predictions"]:
+            raw, thr, score = pred["raw_score"], pred["operating_threshold"], pred["probability"]
+            assert thr < 0.2                      # tuned thresholds are low (rare findings)
+            assert (raw >= thr) == (score >= 0.5) == pred["is_positive"]
 
 
 def create_synthetic_dicom_with_pattern(pattern: str = "blank") -> Dataset:
@@ -216,4 +230,42 @@ def test_inference_engine_produces_distinct_predictions_across_samples():
         hm_real = engine.gradcam.generate_heatmap(engine.preprocessor.process(pydicom.dcmread(existing_samples[0]))[0], class_idx=0)
         assert float(hm_real.std()) > 0.01
 
+
+
+
+def test_gradcam_is_not_corrupted_by_concurrent_predictions():
+    import threading
+    import pydicom
+    engine = InferenceEngine()
+    ds_a = pydicom.dcmread("test_samples/patient_01_pneumonia.dcm")
+    ds_b = pydicom.dcmread("test_samples/patient_03_cardiomegaly.dcm")
+    tensor_a, _ = engine.preprocessor.process(ds_a)
+    reference = engine.gradcam.generate_heatmap(tensor_a, class_idx=0)
+
+    stop = threading.Event()
+
+    def hammer_predict():
+        while not stop.is_set():
+            engine.predict(ds_b)
+
+    workers = [threading.Thread(target=hammer_predict) for _ in range(2)]
+    for t in workers:
+        t.start()
+    try:
+        for _ in range(6):
+            heatmap = engine.gradcam.generate_heatmap(tensor_a, class_idx=0)
+            np.testing.assert_allclose(heatmap, reference, atol=1e-4)
+    finally:
+        stop.set()
+        for t in workers:
+            t.join()
+
+
+def test_build_thoracic_model_respects_architecture_setting():
+    import pytest as _pytest
+    from medshield.ml.model import ThoracicClassifier
+    assert isinstance(build_thoracic_model(architecture="efficientnet_v2_s"), ThoracicClassifier)
+    assert isinstance(build_thoracic_model(architecture="torchxrayvision"), TorchXRayVisionClassifier)
+    with _pytest.raises(ValueError):
+        build_thoracic_model(architecture="resnet9000")
 
