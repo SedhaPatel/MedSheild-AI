@@ -15,6 +15,7 @@ build/
 .agents/
 skills-lock.json
 /storage/
+/.kms/
 tests/test_data/
 weights/
 .claude/

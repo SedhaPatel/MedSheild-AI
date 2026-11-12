@@ -6,6 +6,7 @@ import os
 from typing import Any, Dict, List, Literal, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.responses import HTMLResponse, JSONResponse
+from starlette.concurrency import run_in_threadpool
 import numpy as np
 from PIL import Image
 from pydantic import BaseModel, Field
@@ -17,21 +18,49 @@ from medshield.config import Settings, get_settings
 from medshield.anonymization.metadata import anonymize_dicom_metadata
 from medshield.anonymization.pixel_cleaner import clean_pixel_annotations
 from medshield.crypto.envelope import encrypt_envelope, decrypt_envelope, unpack_envelope_header
-from medshield.crypto.kms_provider import LocalKMSProvider
+from medshield.api.routes.studies import _shared_kms
+from medshield.crypto.kms_provider import KeyNotFoundError, KeyRevokedError
 from medshield.storage.encrypted_store import EncryptedStore
+from medshield.verification.compliance_scanner import ComplianceScanner
 from medshield.verification.entropy_analyzer import calculate_shannon_entropy
-from medshield.ml.inference_engine import InferenceEngine
+from medshield.api.routes.inference import _shared_engine
 from medshield.ml.chat_service import ScanChatService
 from medshield.utils.dicom_helpers import extract_pixel_array, write_pixel_array_to_dataset
 
 router = APIRouter(tags=["Clinical Dashboard"])
 
 # Shared engine and crypto resources for the interactive dashboard session
-_dashboard_kms = LocalKMSProvider()
+# Must be the same KMS instance as the STOW-RS/inference routers: both write to the same
+# `<anon_uid>.enc` path, so separate KMS instances make each other's envelopes undecryptable.
+_dashboard_kms = _shared_kms
 _dashboard_store: Dict[str, EncryptedStore] = {}
-_dashboard_engine = InferenceEngine()
+_dashboard_engine = _shared_engine
 _dashboard_worklist: Dict[str, Dict[str, Any]] = {}
 _dashboard_session_cache: Dict[str, Dict[str, Any]] = {}
+
+def _decrypt_study_or_http_error(encrypted_container: bytes) -> bytes:
+    """Decrypts a study envelope, mapping each failure mode to a distinct HTTP error."""
+    try:
+        return decrypt_envelope(encrypted_container, _dashboard_kms)
+    except KeyRevokedError as e:
+        raise HTTPException(
+            status_code=410,
+            detail=f"Study cryptographic key has been revoked (DPDP Sec. 12 Crypto-Shredded): {e}",
+        )
+    except KeyNotFoundError:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Study key is unavailable: the in-memory KMS lost its keys (server restarted). "
+                "Re-ingest the study, or set MEDSHIELD_KMS_KEYSTORE_PATH to persist keys across restarts."
+            ),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Encrypted envelope failed integrity verification (corrupted or tampered): {type(e).__name__}",
+        )
+
 
 TRACKED_PII_TAGS = [
     ("PatientName", "Patient Full Name", "(0010,0010)"),
@@ -173,13 +202,7 @@ def analyze_dashboard_study(
         if not store.exists(study_uid):
             raise HTTPException(status_code=404, detail=f"Study '{study_uid}' not found in encrypted storage.")
         encrypted_container = store.load(study_uid)
-        try:
-            decrypted_bytes = decrypt_envelope(encrypted_container, _dashboard_kms)
-        except Exception as e:
-            raise HTTPException(
-                status_code=410,
-                detail=f"Study key revoked via DPDP Crypto-Shredding or decryption failed: {str(e)}"
-            )
+        decrypted_bytes = _decrypt_study_or_http_error(encrypted_container)
         inference_ds = pydicom.dcmread(io.BytesIO(decrypted_bytes), force=True)
         anon_study_uid = study_uid
         study_kek_id = f"{settings.kms_master_key_id}:{anon_study_uid}"
@@ -208,6 +231,10 @@ def analyze_dashboard_study(
         original_filename = "upload.dcm"
 
         if sample_id:
+            # Whitelist sample IDs to prevent path traversal (e.g. sample_id="../../etc/x")
+            known_sample_ids = {s["id"] for s in list_dashboard_samples()["samples"]}
+            if sample_id not in known_sample_ids:
+                raise HTTPException(status_code=404, detail=f"Sample '{sample_id}' not found on server")
             sample_path = os.path.join("test_samples", f"{sample_id}.dcm")
             if not os.path.exists(sample_path):
                 sample_path = os.path.join("test_samples", f"{sample_id}.png")
@@ -217,7 +244,13 @@ def analyze_dashboard_study(
                 raw_bytes = f.read()
             original_filename = os.path.basename(sample_path)
         elif file:
-            raw_bytes = file.file.read()
+            max_bytes = int(settings.max_upload_mb * 1024 * 1024)
+            raw_bytes = file.file.read(max_bytes + 1)
+            if len(raw_bytes) > max_bytes:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Upload exceeds the {settings.max_upload_mb:g} MB limit (MEDSHIELD_MAX_UPLOAD_MB).",
+                )
             original_filename = file.filename or "uploaded_scan"
         else:
             raise HTTPException(status_code=400, detail="Please select a pre-packaged case or upload a file.")
@@ -281,7 +314,13 @@ def analyze_dashboard_study(
 
         # Step 4: AES-256-GCM Envelope Encryption with Study-Level Isolated KEK
         study_kek_id = f"{settings.kms_master_key_id}:{anon_study_uid}"
-        plaintext_dek, ciphertext_dek = _dashboard_kms.generate_data_key(study_kek_id)
+        try:
+            plaintext_dek, ciphertext_dek = _dashboard_kms.generate_data_key(study_kek_id)
+        except KeyRevokedError:
+            raise HTTPException(
+                status_code=409,
+                detail="This study was crypto-shredded (DPDP Sec. 12); its key is revoked and it cannot be re-ingested.",
+            )
         encrypted_container = encrypt_envelope(
             payload=sanitized_dicom_bytes,
             plaintext_dek=plaintext_dek,
@@ -309,6 +348,8 @@ def analyze_dashboard_study(
         # Step 5: In-Memory Deep Learning Diagnostic Inference
         decrypted_bytes = decrypt_envelope(encrypted_container, _dashboard_kms)
         inference_ds = pydicom.dcmread(io.BytesIO(decrypted_bytes), force=True)
+
+    compliance_report = ComplianceScanner().scan_dataset(inference_ds)
 
     engine = _dashboard_engine
     inference_result = engine.predict(inference_ds)
@@ -376,7 +417,12 @@ def analyze_dashboard_study(
         },
         "deidentification": {
             "burned_in_text_redacted": was_redacted,
-            "safe_harbor_compliance": "100% COMPLIANT",
+            "safe_harbor_compliance": (
+                "IDENTIFIER TAGS REMOVED" if compliance_report.is_compliant
+                else f"{len(compliance_report.violations)} VIOLATION(S)"
+            ),
+            "compliance_violations": compliance_report.violations,
+            "date_handling": "Shifted by a salted per-patient offset (+/-365 days); intervals preserved. HIPAA Safe Harbor requires dates reduced to year, so this needs Expert Determination.",
             "uid_root": "2.25 (Private Pseudonymized Root)",
             "tag_diff_matrix": tag_diff_matrix
         },
@@ -386,6 +432,7 @@ def analyze_dashboard_study(
             "weights_source": inference_result["weights_source"],
             "inference_latency_ms": inference_result["inference_latency_ms"],
             "overall_triage_urgency": top_urgency,
+            "score_semantics": inference_result.get("score_semantics"),
             "active_heatmap_pathology": valid_pathology,
             "predictions": inference_result["predictions"]
         },
@@ -427,13 +474,7 @@ def stream_dashboard_dicom(
         raise HTTPException(status_code=404, detail="Study not found in encrypted storage")
 
     enc_blob = store.load(study_uid)
-    try:
-        plaintext_bytes = decrypt_envelope(enc_blob, _dashboard_kms)
-    except Exception as e:
-        raise HTTPException(
-            status_code=410,
-            detail=f"Study cryptographic key has been revoked (DPDP Sec. 12 Crypto-Shredded): {str(e)}"
-        )
+    plaintext_bytes = _decrypt_study_or_http_error(enc_blob)
 
     disposition = "attachment" if download else "inline"
     return Response(
@@ -485,7 +526,9 @@ def demo_crypto_shredding(study_uid: str, settings: Settings = Depends(get_setti
 
 class ScanChatTurn(BaseModel):
     role: Literal["user", "assistant"]
-    content: str = Field(..., min_length=1, max_length=1500)
+    # Past assistant answers are routinely longer than a new question (1500 chars), so history
+    # turns get a larger cap; otherwise every follow-up after a long answer fails with HTTP 422.
+    content: str = Field(..., min_length=1, max_length=8000)
 
 
 class ScanChatRequest(BaseModel):
@@ -521,44 +564,43 @@ async def scan_chat_endpoint(
     5. Dispatches zero-PII grounded chat via ScanChatService.
     CRITICAL: Never accesses _dashboard_session_cache.
     """
-    store = _dashboard_store.get(settings.storage_path) or EncryptedStore(storage_dir=settings.storage_path)
-    if not store.exists(req.scan_id):
-        raise HTTPException(status_code=404, detail=f"Scan '{req.scan_id}' not found in encrypted storage")
+    def _prepare_scan_context():
+        # Decryption, CNN inference and Grad-CAM are CPU-bound; run off the event loop
+        store = _dashboard_store.get(settings.storage_path) or EncryptedStore(storage_dir=settings.storage_path)
+        if not store.exists(req.scan_id):
+            raise HTTPException(status_code=404, detail=f"Scan '{req.scan_id}' not found in encrypted storage")
 
-    enc_blob = store.load(req.scan_id)
-    try:
-        decrypted_bytes = decrypt_envelope(enc_blob, _dashboard_kms)
-    except Exception as e:
-        raise HTTPException(
-            status_code=410,
-            detail=f"Study cryptographic key has been revoked (DPDP Sec. 12 Crypto-Shredded): {str(e)}"
-        )
+        enc_blob = store.load(req.scan_id)
+        decrypted_bytes = _decrypt_study_or_http_error(enc_blob)
 
-    cleaned_ds = pydicom.dcmread(io.BytesIO(decrypted_bytes), force=True)
+        cleaned_ds = pydicom.dcmread(io.BytesIO(decrypted_bytes), force=True)
 
-    # In-memory inference using _dashboard_engine
-    pred_result = _dashboard_engine.predict(cleaned_ds)
-    predictions_list = pred_result.get("predictions", [])
+        # In-memory inference using _dashboard_engine
+        pred_result = _dashboard_engine.predict(cleaned_ds)
+        predictions_list = pred_result.get("predictions", [])
 
-    # Resolve target_pathology by matching req.target_pathology against
-    # [p["pathology"] for p in pred_result["predictions"]], defaulting to highest-probability item if absent/unmatched
-    valid_pathologies = [p.get("pathology") for p in predictions_list if "pathology" in p]
-    target_pathology = req.target_pathology
-    if not target_pathology or target_pathology not in valid_pathologies:
-        if predictions_list:
-            highest_pred = max(predictions_list, key=lambda x: float(x.get("probability", 0.0)))
-            target_pathology = highest_pred.get("pathology", "Pneumonia")
-        else:
-            target_pathology = "Pneumonia"
+        # Resolve target_pathology by matching req.target_pathology against
+        # [p["pathology"] for p in pred_result["predictions"]], defaulting to highest-probability item if absent/unmatched
+        valid_pathologies = [p.get("pathology") for p in predictions_list if "pathology" in p]
+        target_pathology = req.target_pathology
+        if not target_pathology or target_pathology not in valid_pathologies:
+            if predictions_list:
+                highest_pred = max(predictions_list, key=lambda x: float(x.get("probability", 0.0)))
+                target_pathology = highest_pred.get("pathology", "Pneumonia")
+            else:
+                target_pathology = "Pneumonia"
 
-    # Heatmap generation if requested or if user asks about heatmap localization
-    heatmap_pil = None
-    user_spatial_query = any(k in req.user_message.lower() for k in ("heatmap", "highlight", "where", "zone", "region", "focus", "saliency", "grad-cam", "gradcam"))
-    if req.include_heatmap_overlay or user_spatial_query:
-        try:
-            heatmap_pil = _dashboard_engine.generate_heatmap_image(cleaned_ds, target_pathology)
-        except Exception:
-            heatmap_pil = None
+        # Heatmap generation if requested or if user asks about heatmap localization
+        heatmap_pil = None
+        user_spatial_query = any(k in req.user_message.lower() for k in ("heatmap", "highlight", "where", "zone", "region", "focus", "saliency", "grad-cam", "gradcam"))
+        if req.include_heatmap_overlay or user_spatial_query:
+            try:
+                heatmap_pil = _dashboard_engine.generate_heatmap_image(cleaned_ds, target_pathology)
+            except Exception:
+                heatmap_pil = None
+        return cleaned_ds, predictions_list, target_pathology, heatmap_pil
+
+    cleaned_ds, predictions_list, target_pathology, heatmap_pil = await run_in_threadpool(_prepare_scan_context)
 
     history_dicts = [{"role": t.role, "content": t.content} for t in req.conversation_history]
 
@@ -1455,21 +1497,25 @@ DASHBOARD_HTML_PAGE = r"""<!DOCTYPE html>
       pc.innerHTML = '';
       const activeTarget = data.ai_diagnostics.active_heatmap_pathology;
       data.ai_diagnostics.predictions.forEach(p => {
-        const pct = (p.probability * 100).toFixed(1);
-        const fillCls = p.probability >= 0.70 ? 'critical' : p.probability >= 0.45 ? 'elevated' : '';
-        const valColor = p.probability >= 0.70 ? 'var(--accent-critical)' : (p.probability >= 0.45 ? 'var(--accent-attention)' : 'var(--text-primary)');
+        // Scores are threshold-normalized (0.50 = model decision threshold), not probabilities
+        const score = p.probability;
+        const positive = (p.is_positive !== undefined) ? p.is_positive : score >= 0.5;
+        const borderline = Math.abs(score - 0.5) < 0.1;
+        const fillCls = positive ? (score >= 0.70 ? 'critical' : 'elevated') : '';
+        const valColor = positive ? (score >= 0.70 ? 'var(--accent-critical)' : 'var(--accent-attention)') : 'var(--text-primary)';
+        const verdict = (positive ? 'Positive' : 'Negative') + (borderline ? ' · borderline' : '');
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'pred-row' + (p.pathology === activeTarget ? ' is-focused' : '');
-        btn.title = `Inspect ${p.pathology} Grad-CAM localization`;
+        btn.title = `${p.pathology}: score ${score.toFixed(2)} (${verdict}). 0.50 is the model threshold; not a percentage chance. Click to inspect Grad-CAM localization.`;
         btn.onclick = () => selectPathologyFromList(p.pathology);
         btn.innerHTML = `
           <div class="pred-meta">
             <span class="pred-label">${p.pathology}</span>
-            <span class="pred-uncertainty">&plusmn;${p.epistemic_uncertainty.toFixed(3)} uncertainty</span>
+            <span class="pred-uncertainty">${verdict}</span>
           </div>
-          <div class="pred-bar-track"><div class="pred-bar-fill ${fillCls}" style="width: ${pct}%"></div></div>
-          <div class="pred-value" style="color: ${valColor};">${pct}%</div>
+          <div class="pred-bar-track" style="position: relative;"><div class="pred-bar-fill ${fillCls}" style="width: ${score * 100}%"></div><div style="position: absolute; left: 50%; top: -2px; width: 1px; height: calc(100% + 4px); background: var(--text-primary);"></div></div>
+          <div class="pred-value" style="color: ${valColor};">${score.toFixed(2)}</div>
         `;
         pc.appendChild(btn);
       });

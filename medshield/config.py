@@ -62,6 +62,10 @@ class Settings(BaseModel):
     kms_master_key_id: str = Field(
         default_factory=lambda: os.getenv("MEDSHIELD_KMS_MASTER_KEY_ID", "arn:medshield:kms:local:key/master-kek-v1")
     )
+    # Optional file that persists LocalKMSProvider keys across restarts (unset = in-memory only)
+    kms_keystore_path: Optional[str] = Field(
+        default_factory=lambda: os.getenv("MEDSHIELD_KMS_KEYSTORE_PATH") or None
+    )
 
     # Network and security settings
     tls_min_version: str = Field(default_factory=lambda: os.getenv("MEDSHIELD_TLS_MIN_VERSION", "TLSv1.3"))
@@ -76,6 +80,9 @@ class Settings(BaseModel):
         default_factory=lambda: _parse_cors_origins(os.getenv("MEDSHIELD_CORS_ORIGINS"))
     )
 
+    # Maximum accepted upload size (DICOM / PNG / JPEG) in megabytes
+    max_upload_mb: float = Field(default_factory=lambda: float(os.getenv("MEDSHIELD_MAX_UPLOAD_MB", "100")))
+
     # Optional unified SPA static hosting settings
     serve_frontend_dist: bool = Field(default_factory=lambda: _parse_bool_env("MEDSHIELD_SERVE_FRONTEND", False))
     frontend_dist_dir: str = Field(
@@ -84,10 +91,10 @@ class Settings(BaseModel):
 
     # Model inference settings
     model_architecture: str = Field(
-        default_factory=lambda: os.getenv("MEDSHIELD_MODEL_ARCHITECTURE", "efficientnet_v2_s")
+        default_factory=lambda: os.getenv("MEDSHIELD_MODEL_ARCHITECTURE", "torchxrayvision")
     )
     model_checkpoint_path: Optional[str] = Field(
-        default_factory=lambda: os.getenv("MEDSHIELD_MODEL_CHECKPOINT_PATH", None)
+        default_factory=lambda: os.getenv("MEDSHIELD_MODEL_CHECKPOINT_PATH") or None
     )
     target_pathologies: List[str] = Field(
         default_factory=lambda: [
