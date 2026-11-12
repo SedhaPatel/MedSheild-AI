@@ -551,9 +551,10 @@ async def scan_chat_endpoint(
         else:
             target_pathology = "Pneumonia"
 
-    # Heatmap generation if requested
+    # Heatmap generation if requested or if user asks about heatmap localization
     heatmap_pil = None
-    if req.include_heatmap_overlay:
+    user_spatial_query = any(k in req.user_message.lower() for k in ("heatmap", "highlight", "where", "zone", "region", "focus", "saliency", "grad-cam", "gradcam"))
+    if req.include_heatmap_overlay or user_spatial_query:
         try:
             heatmap_pil = _dashboard_engine.generate_heatmap_image(cleaned_ds, target_pathology)
         except Exception:
@@ -571,6 +572,7 @@ async def scan_chat_endpoint(
             conversation_history=history_dicts,
             heatmap_pil=heatmap_pil,
             settings=settings,
+            attach_heatmap_image=req.include_heatmap_overlay,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

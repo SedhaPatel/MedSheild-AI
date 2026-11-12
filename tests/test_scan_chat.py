@@ -12,10 +12,13 @@ from medshield.api.app import create_app
 from medshield.api.routes.dashboard import _dashboard_kms, _dashboard_session_cache
 from medshield.config import Settings, get_settings
 from medshield.ml.chat_service import (
+    analyze_heatmap_zones,
     assert_zero_pii_and_extract_image,
     build_grounded_system_prompt,
     compute_heatmap_zone_summary,
+    extract_scan_telemetry,
     redact_chat_pii,
+    synthesize_offline_grounded_reply,
     ScanChatService,
 )
 
@@ -664,5 +667,223 @@ def test_chat_endpoint_zero_pii_violation_returns_422(monkeypatch, tmp_path):
     )
     assert resp.status_code == 422
     assert "violates HIPAA/Safe Harbor" in resp.json()["detail"]
+
+
+def test_extract_scan_telemetry_zero_pii():
+    ds = make_compliant_dicom(burned_in="NO")
+    telemetry = extract_scan_telemetry(ds)
+    assert isinstance(telemetry, dict)
+    assert "dynamic_range" in telemetry
+    assert "contrast_std" in telemetry
+    assert "left_vs_right_asymmetry" in telemetry
+    assert "vertical_density" in telemetry
+    assert "photometric_polarity" in telemetry
+    # Ensure zero DICOM text metadata
+    assert "PatientName" not in telemetry
+    assert "PatientID" not in telemetry
+    assert "StudyInstanceUID" not in telemetry
+
+
+def test_analyze_heatmap_zones_structured():
+    img = Image.new("RGB", (300, 300), color=(10, 10, 10))
+    for y in range(220, 280):
+        for x in range(20, 80):
+            img.putpixel((x, y), (255, 30, 30))
+
+    analysis = analyze_heatmap_zones(img)
+    assert isinstance(analysis, dict)
+    assert analysis["has_heatmap"] is True
+    assert "peak_zone" in analysis
+    assert "secondary_zone" in analysis
+    assert "focus_percentage" in analysis
+    assert isinstance(analysis["focus_percentage"], (int, float))
+    assert "summary" in analysis
+
+
+def test_local_chat_gives_distinct_answers_per_question(tmp_path):
+    storage_dir = str(tmp_path / "enc_studies")
+    settings = Settings(
+        storage_path=storage_dir,
+        secret_pepper=b"test-salt-distinct-1",
+        require_mtls=False,
+        chat_provider="gemini",
+        gemini_api_key="",  # force offline grounded reply
+    )
+    app = create_app(settings)
+    app.dependency_overrides[get_settings] = lambda: settings
+    client = TestClient(app)
+
+    analyze_resp = client.post(
+        "/api/v1/dashboard/analyze",
+        data={"sample_id": "patient_01_pneumonia"},
+    )
+    assert analyze_resp.status_code == 200
+    uid = analyze_resp.json()["anonymous_study_instance_uid"]
+
+    questions = [
+        "Explain this finding in simple terms",
+        "What did the heatmap highlight?",
+        "Next recommended clinical steps",
+        "Is there evidence of Pneumothorax?",
+    ]
+
+    replies = []
+    for q in questions:
+        resp = client.post(
+            "/api/chat",
+            json={"scan_id": uid, "user_message": q, "include_heatmap_overlay": True},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["zero_pii_verified"] is True
+        assert data["provider_used"] == "grounded-local-fallback"
+        replies.append(data["answer"])
+
+    # 1. Assert all 4 replies are pairwise distinct
+    assert len(set(replies)) == 4
+
+    r_simple, r_heatmap, r_steps, r_pathology = replies
+
+    # 2. Check substantive differentiation per question intent
+    # Simple terms: plain language explaining findings
+    assert any(term in r_simple.lower() for term in ["simple", "plain", "layman", "patient", "everyday", "clear", "means that", "in simple terms"])
+    # Heatmap: anatomical spatial localization terms
+    assert any(term in r_heatmap.lower() for term in ["heatmap", "saliency", "zone", "hemithorax", "apical", "basilar", "perihilar", "localization"])
+    # Next clinical steps: action / workup recommendations
+    assert any(term in r_steps.lower() for term in ["recommend", "workup", "ct", "follow-up", "monitoring", "action", "next step", "management", "triage"])
+    # Pneumothorax: specific pathology inquiry
+    assert "pneumothorax" in r_pathology.lower()
+
+
+def test_local_chat_adapts_across_different_scans(tmp_path):
+    storage_dir = str(tmp_path / "enc_studies")
+    settings = Settings(
+        storage_path=storage_dir,
+        secret_pepper=b"test-salt-scans-2",
+        require_mtls=False,
+        chat_provider="gemini",
+        gemini_api_key="",
+    )
+    app = create_app(settings)
+    app.dependency_overrides[get_settings] = lambda: settings
+    client = TestClient(app)
+
+    # Scan 1: patient_01_pneumonia
+    resp1 = client.post(
+        "/api/v1/dashboard/analyze",
+        data={"sample_id": "patient_01_pneumonia"},
+    )
+    assert resp1.status_code == 200
+    uid1 = resp1.json()["anonymous_study_instance_uid"]
+
+    # Scan 2: patient_02_effusion
+    resp2 = client.post(
+        "/api/v1/dashboard/analyze",
+        data={"sample_id": "patient_02_effusion"},
+    )
+    assert resp2.status_code == 200
+    uid2 = resp2.json()["anonymous_study_instance_uid"]
+
+    q = "What is the primary diagnosis and confidence level?"
+    chat1 = client.post("/api/chat", json={"scan_id": uid1, "user_message": q})
+    chat2 = client.post("/api/chat", json={"scan_id": uid2, "user_message": q})
+
+    assert chat1.status_code == 200
+    assert chat2.status_code == 200
+
+    ans1 = chat1.json()["answer"]
+    ans2 = chat2.json()["answer"]
+    assert ans1 != ans2
+    assert chat1.json()["grounded_findings"] != chat2.json()["grounded_findings"]
+
+
+def test_ollama_local_provider_dispatch_and_fallback(monkeypatch, tmp_path):
+    storage_dir = str(tmp_path / "enc_studies")
+    settings = Settings(
+        storage_path=storage_dir,
+        secret_pepper=b"test-salt-ollama-3",
+        require_mtls=False,
+        chat_provider="ollama",
+        ollama_base_url="http://127.0.0.1:11434",
+        ollama_model="llama3.2-vision",
+    )
+    app = create_app(settings)
+    app.dependency_overrides[get_settings] = lambda: settings
+    client = TestClient(app)
+
+    analyze_resp = client.post(
+        "/api/v1/dashboard/analyze",
+        data={"sample_id": "patient_01_pneumonia"},
+    )
+    assert analyze_resp.status_code == 200
+    uid = analyze_resp.json()["anonymous_study_instance_uid"]
+
+    # 1. Test dispatch when Ollama responds 200
+    captured_requests = []
+    import httpx
+
+    async def mock_ollama_post(self, url, **kwargs):
+        captured_requests.append({"url": str(url), **kwargs})
+        return httpx.Response(
+            status_code=200,
+            json={
+                "model": "llama3.2-vision",
+                "message": {
+                    "role": "assistant",
+                    "content": "Ollama local vision model: Consolidated density observed in right lung field."
+                },
+                "done": True,
+            },
+            request=httpx.Request("POST", str(url)),
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_ollama_post)
+
+    chat_resp = client.post(
+        "/api/chat",
+        json={
+            "scan_id": uid,
+            "user_message": "Patient MRN-773344 check for consolidation",
+            "include_heatmap_overlay": True,
+        },
+    )
+    assert chat_resp.status_code == 200
+    data = chat_resp.json()
+    assert data["provider_used"] == "llama3.2-vision"
+    assert "Consolidated density" in data["answer"]
+    assert data["zero_pii_verified"] is True
+    assert data["pii_redacted_from_prompt"] is True
+
+    # Outbound checks
+    assert len(captured_requests) == 1
+    req = captured_requests[0]
+    assert "11434/api/chat" in req["url"]
+    json_body = req["json"]
+    assert json_body["model"] == "llama3.2-vision"
+    assert json_body["stream"] is False
+    body_str = str(json_body)
+    assert "MRN-773344" not in body_str
+    assert "[REDACTED_PII]" in body_str
+    # Verify image presence in messages
+    user_msg = json_body["messages"][-1]
+    assert "images" in user_msg
+    assert len(user_msg["images"]) >= 1
+
+    # 2. Test clean fallback when Ollama is unreachable
+    async def mock_ollama_unreachable(self, url, **kwargs):
+        raise httpx.ConnectError("Connection refused to http://127.0.0.1:11434")
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_ollama_unreachable)
+
+    fallback_resp = client.post(
+        "/api/chat",
+        json={"scan_id": uid, "user_message": "Explain this finding"},
+    )
+    assert fallback_resp.status_code == 200
+    fb_data = fallback_resp.json()
+    assert fb_data["provider_used"] == "grounded-local-fallback"
+    assert len(fb_data["answer"]) > 50
+    assert fb_data["zero_pii_verified"] is True
+
 
 

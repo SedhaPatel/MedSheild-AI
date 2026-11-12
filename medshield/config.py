@@ -105,6 +105,12 @@ class Settings(BaseModel):
     gemini_model: str = Field(default_factory=lambda: os.getenv("MEDSHIELD_GEMINI_MODEL", "gemini-2.5-flash"))
     hf_api_token: Optional[str] = Field(default_factory=lambda: os.getenv("HF_API_TOKEN", None))
     medgemma_model: str = Field(default_factory=lambda: os.getenv("MEDSHIELD_MEDGEMMA_MODEL", "google/medgemma-1.5-4b-it"))
+    ollama_base_url: str = Field(
+        default_factory=lambda: os.getenv("MEDSHIELD_OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    )
+    ollama_model: str = Field(
+        default_factory=lambda: os.getenv("MEDSHIELD_OLLAMA_MODEL", "llama3.2-vision")
+    )
     chat_timeout_sec: float = Field(default_factory=lambda: float(os.getenv("MEDSHIELD_CHAT_TIMEOUT_SEC", "25.0")))
 
     @field_validator("cors_origins", mode="before")
