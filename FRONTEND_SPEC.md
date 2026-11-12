@@ -44,10 +44,10 @@ The UI preserves the **Daylight Evidence-First Clinical Portal** aesthetic acros
 ### 3.1 UI Placement & Visual Discipline
 To preserve the clean 2-card dashboard without compressing Card 1/Card 2 heights or adding permanent chat chrome:
 
-1. **Single Trigger Button Inside Card 2 (`OverviewPage.tsx` Results Card):**
-   - Add one uncluttered button labeled **`Ask AI About This Scan`** (using existing `<Button variant="soft" size="sm">` / header utility slot or action row beside `Preview Grad-CAM Overlay` — subtle soft sky fill `#E0F2FE` with `#0284C7` border, `MessageSquareText` Lucide icon).
-   - Disabled gracefully with clear tooltip if no study is loaded or if the active `scan_id` has been crypto-shredded (`isShredded === true`).
-   - Clicking opens a **Daylight Slide-Over Drawer** (same reusable `<ScanChatDrawer />` component can also be triggered optionally from `WorkstationPage.tsx`).
+1. **Single Trigger Button Inside Card 2 Header (`OverviewPage.tsx` Results Card):**
+   - Place one uncluttered `<Button variant="soft" size="sm">` labeled **`Ask AI About This Scan`** inside the Card 2 header utility bar (to the left of the confidence badge, rendered cleanly in both pre-upload and post-upload states).
+   - Disabled gracefully with accessible Radix Tooltip when `!activeStudy` (`"Upload or select a scan first"`) or when the active `scan_id` has been crypto-shredded (`"Study erased under DPDP Sec. 12"`).
+   - Clicking opens a **Daylight Slide-Over Drawer** (`<ScanChatDrawer />` mounted inside `<BrowserRouter>` in `App.tsx`, also optionally triggered from `WorkstationPage.tsx`). When `chatOpen === true`, global reading hotkeys (`1`/`2`/`3`/`I`/`+`/`-`/`0`) in `App.tsx` are muted.
 
 2. **Slide-Over Drawer (`ScanChatDrawer.tsx` — Built on `@radix-ui/react-dialog`):**
    - **Dimensions:** Fixed right sheet (`width: 420px` on desktop `>= 640px`, `width: 100vw` max sheet on mobile), `h-full`, `bg-bg-panel` (`#FFFFFF`), left boundary `1px solid var(--border-strong)`, frosted backdrop `bg-bg-backdrop backdrop-blur-xs`, zero dark shadow or text glow.
@@ -67,9 +67,12 @@ To preserve the clean 2-card dashboard without compressing Card 1/Card 2 heights
      - **Message Bubbles:**
        - User bubble: right-aligned, max-width `85%`, `bg-accent-brand-soft border border-accent-brand-border text-text-primary`, `rounded-[var(--panel-radius)]`.
        - Assistant bubble: left-aligned, max-width `92%`, `bg-bg-canvas border border-border-subtle text-text-primary`, renders structured paragraphs cleanly plus collapsible/compact grounded chip footer (e.g. `Grounded: DenseNet-121 • Zero-PII Checked`) and provider badge (`Gemini` / `MedGemma` / `Offline Fallback`).
-     - **Loading & Error States:**
-       - Pending state renders a non-blocking matte typing indicator inside the thread + disables duplicate send.
-       - HTTP `410 Gone` (study crypto-shredded under DPDP Sec. 12) displays a crisp crimson inline notice explaining that conversation on an erased study is blocked cleanly.
+     - **Loading, Erasure & Transport States:**
+       - Uses standard **synchronous JSON REST (`POST /api/chat`)**; while pending, shows a non-blocking matte typing indicator inside the thread and prevents duplicate submits.
+       - Frontend `safeApiRequest` throws typed `ApiError(message, status)` so **`HTTP 410 Gone`** (DPDP Sec. 12 crypto-shredded) is caught cleanly by status code and displays a crisp crimson inline notice inside the drawer.
+   - **Frontend State vs. Wire Type Contract:**
+     - Client UI thread stores `ScanChatMessage[]` (`id`, `role: 'user' | 'assistant' | 'system'`, `content`, `provider_used?`, `grounded_findings?`, `timestamp`, `isError?`).
+     - Before `POST /api/chat`, `conversation_history` is mapped strictly to `ScanChatTurn[]` (`{ role: 'user' | 'assistant', content: string }`), filtering out `system` notices and capping to the most recent `6` turns.
    - **Composer Footer (`bg-bg-input border-t border-border-subtle`):**
      - Single-row auto-growing `<textarea>` (`maxlength=1500`) + Send button (`variant="primary"`).
      - **IME-Safe Enter Handling (`ui-ux-pro-max`):** `Enter` (without `Shift`/`Ctrl`/`Meta`) guards `if (e.isComposing || e.keyCode === 229) return` before submitting; `Shift+Enter` inserts newline.
@@ -92,14 +95,16 @@ To preserve the clean 2-card dashboard without compressing Card 1/Card 2 heights
   "scan_id": "2.25.7093991301889367304617530439374403004898731214931828136692",
   "user_message": "What did the heatmap highlight?",
   "target_pathology": "Pneumonia",
-  "include_heatmap_overlay": false,
+  "include_heatmap_overlay": true,
   "conversation_history": [
     { "role": "user", "content": "Explain this finding in simple terms" },
     { "role": "assistant", "content": "..." }
   ]
 }
 ```
-> Note: Client does **not** pass raw DICOM images or mutable disease probabilities as authoritative truth. When `scan_id` resolves an encrypted `.enc` envelope on disk, the backend treats the decrypted scrubbed image + fresh/verified `InferenceEngine` predictions as single source of truth.
+> Notes:
+> - Client does **not** pass raw DICOM images or mutable disease probabilities as authoritative truth. When `scan_id` resolves an encrypted `.enc` envelope on disk, the backend treats the decrypted scrubbed image + `InferenceEngine` predictions as single source of truth.
+> - **Heatmap Grounding (`include_heatmap_overlay`):** Frontend sets `include_heatmap_overlay: true` automatically whenever the Grad-CAM preview toggle (`previewHeatmap`) or PACS `heatmap` tab is active, OR when Quick Question #2 (`"What did the heatmap highlight?"`) / `"heatmap"` is asked. When `true`, the backend generates the scrubbed Grad-CAM blended image (`_dashboard_engine.generate_heatmap_image(cleaned_ds, valid_pathology)`) + computes the spatial lung quadrant peak label cleanly from the activation map, supplying the scrubbed heatmap overlay image cleanly so Gemini / MedGemma inspect the actual localized activation without guessing.
 
 **`POST /api/chat` Response (`ScanChatResponse`):**
 ```json
@@ -121,7 +126,7 @@ To preserve the clean 2-card dashboard without compressing Card 1/Card 2 heights
 
 1. **Forbidden Cache Isolation:** `_dashboard_session_cache` retains `pre_pii_tags` and `raw_image_data_url` solely for the `/security` audit diff UI. `/api/chat` **MUST NEVER** read `_dashboard_session_cache`.
 2. **Envelope-Only Decryption + DPDP Sec. 12 Gate:** `/api/chat` loads `store.load(scan_id)` (`404` if unknown) and decrypts in RAM via `decrypt_envelope(enc_blob, _dashboard_kms)`. If the study Master KEK was shredded, decryption raises and returns **`HTTP 410 Gone`**, halting chat immediately.
-3. **Runtime Pre-Egress Compliance Gate (`ComplianceScanner`):** Runs `ComplianceScanner().audit_dataset(cleaned_ds)` and verifies `getattr(cleaned_ds, "BurnedInAnnotation", None) == "NO"` before rendering an RGB PNG (`max 768×768`) solely from scrubbed `PixelData`—zero DICOM metadata attributes are serialized into the VLM prompt.
+3. **Runtime Pre-Egress Compliance Gate (`ComplianceScanner`):** Runs `ComplianceScanner().scan_dataset(cleaned_ds)` (`is_compliant == True`, raising `HTTP 422` if any HIPAA identifier remains) and verifies `getattr(cleaned_ds, "BurnedInAnnotation", None) == "NO"` before rendering a downscaled RGB PNG (`max 768×768`) solely from scrubbed `PixelData`—zero DICOM metadata attributes are serialized into the VLM prompt.
 4. **Prompt Egress PII Scrubber (`redact_chat_pii`):** Scans `user_message` and `conversation_history` (capped to last `6` turns) to mask accidental typed patterns (MRNs, SSN-like IDs, DOB strings, phone numbers, email addresses) with `[REDACTED_PII]` before invoking any external model API.
 5. **Strict System Grounding Prompt:** Constrains Gemini / MedGemma to explain **only** the scrubbed radiograph and the exact JSON probability/uncertainty list computed by DenseNet-121, forbidding fabricated lab values, demographic assumptions, or autonomous diagnostic claims, and always returning `medical_disclaimer`.
 
@@ -133,3 +138,4 @@ Implemented via asynchronous `httpx.AsyncClient` (already in [`requirements.txt`
   - `MEDSHIELD_MEDGEMMA_MODEL`: `"google/medgemma-1.5-4b-it"`
   - `MEDSHIELD_CHAT_TIMEOUT_SEC`: `25.0`
 - **Offline Deterministic Grounded Fallback:** If neither `GEMINI_API_KEY` nor `HF_API_TOKEN` is configured (or upstream network fails cleanly), returns a structured `"grounded-local-fallback"` answer built directly from the DenseNet-121 probabilities, epistemic uncertainty bounds, and radiology cues + clinical disclaimer so testing and offline PACS deployments never break.
+

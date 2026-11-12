@@ -4,7 +4,7 @@
 
 **Goal:** Build the Zero-PII `"Chat About This Scan"` clinical VLM assistant (`POST /api/chat` + daylight Radix slide-over drawer inside the existing 2-card dashboard and PACS workstation) while strictly preserving the existing daylight porcelain template and colors.
 
-**Architecture:** Backend endpoint `/api/chat` (and alias `/api/v1/dashboard/chat`) decrypts only the post-sanitization DICOM payload from `EncryptedStore` using `scan_id`, re-validates zero-PHI compliance via `ComplianceScanner`, scrubs accidental typed identifiers from user messages, grounds an async `httpx` VLM adapter (`Gemini 2.5 Flash` Multimodal or `google/medgemma-1.5-4b-it`, with deterministic offline fallback) exclusively on sanitized image pixels + DenseNet-121 predictions, and streams structured responses into a `420px` daylight Radix Dialog slide-over drawer (`ScanChatDrawer.tsx`).
+**Architecture:** Synchronous JSON REST endpoint `POST /api/chat` (and alias `/api/v1/dashboard/chat`) decrypts only the post-sanitization DICOM payload from `EncryptedStore` using `scan_id`, re-validates zero-PHI compliance via `ComplianceScanner().scan_dataset(cleaned_ds)`, scrubs accidental typed identifiers from user messages, grounds an async `httpx` VLM adapter (`Gemini 2.5 Flash` Multimodal or `google/medgemma-1.5-4b-it`, with deterministic offline fallback) exclusively on sanitized image pixels + optional scrubbed Grad-CAM blend + DenseNet-121 predictions, and returns structured JSON into a `420px` daylight Radix Dialog slide-over drawer (`ScanChatDrawer.tsx`).
 
 **Tech Stack:** Python 3.14, FastAPI, `httpx`, Pydicom, Cryptography, React 19, TypeScript, Vite, `@radix-ui/react-dialog`, Zustand, Tailwind CSS v4 (semantic tokens from `frontend/tokens.json`), Pytest, Playwright.
 
@@ -14,7 +14,7 @@
 
 ## Global Constraints
 
-- **100% Zero-PII Egress:** `/api/chat` MUST NOT read `_dashboard_session_cache` (which contains `pre_pii_tags` and `raw_image_data_url`). Always decrypt directly from `EncryptedStore` via `decrypt_envelope()` and verify `ComplianceScanner.audit_dataset(ds).is_compliant == True` before VLM calls.
+- **100% Zero-PII Egress:** `/api/chat` MUST NOT read `_dashboard_session_cache` (which contains `pre_pii_tags` and `raw_image_data_url`). Always decrypt directly from `EncryptedStore` via `decrypt_envelope()` and verify `ComplianceScanner().scan_dataset(ds).is_compliant == True` (raising `HTTPException(status_code=422)` on violation) before VLM calls.
 - **DPDP Act Sec. 12 Right-to-Erasure Parity:** If `scan_id`'s KMS key was shredded (`decrypt_envelope` raises), `/api/chat` MUST fail closed with `HTTP 410 Gone` and surface an inline erased-study block in the UI.
 - **UI Template & Palette Invariant:** Preserve [`OverviewPage.tsx`](file:///d:/ISC-Project/frontend/src/pages/OverviewPage.tsx) 2-card grid, [`tokens.json`](file:///d:/ISC-Project/frontend/tokens.json) daylight palette (`#F8FAFC`, `#FFFFFF`, `#EEF3F8`, `#0284C7`, `#0F766E`), matte slate ink (`text-shadow: none !important`), and pass `validate-tokens.cjs` with `0` violations.
 - **TypeScript Strictness:** `verbatimModuleSyntax: true` (`import type` required), `erasableSyntaxOnly: true` (no `enum`), `noUnusedLocals: true`.
@@ -55,8 +55,8 @@
 
 **Interfaces:**
 - Produces: `redact_chat_pii(text: str) -> tuple[str, bool]`
-- Produces: `dataset_to_sanitized_vlm_png_b64(ds: Dataset) -> str`
-- Produces: `ScanChatService.generate_reply(...) -> dict[str, Any]`
+- Produces: `assert_zero_pii_and_extract_image(dataset: Dataset) -> str`
+- Produces: `async ScanChatService.generate_reply(*, dataset: Dataset, user_message: str, predictions: List[Dict[str, Any]], target_pathology: str, conversation_history: List[Dict[str, str]], heatmap_pil: Optional[Image.Image] = None) -> Dict[str, Any]` (returns keys matching `ScanChatResponse` fields minus `scan_id`; caller in `dashboard.py` injects `scan_id`).
 
 - [ ] **Step 1: Write failing unit tests in `tests/test_scan_chat.py`**
 
@@ -92,8 +92,8 @@ def test_grounded_system_prompt_contains_only_model_metrics_and_disclaimer():
 
 - [ ] **Step 4: Implement `medshield/ml/chat_service.py`**
   - `redact_chat_pii(text: str)` scrubbing MRN/SSN/DOB/phone/email/honorific patterns (`Dr./Mr./Mrs./Ms.` + capitalized name).
-  - `assert_zero_pii_and_extract_image(ds: Dataset) -> str`: enforces `ComplianceScanner().audit_dataset(ds).is_compliant` and `getattr(ds, "BurnedInAnnotation", None) == "NO"`, then converts normalized monochrome `PixelData` directly into a clean `<= 768×768` RGB PNG base64 string (zero DICOM tags forwarded).
-  - Async `httpx` callers for **Gemini Multimodal API** (`generativelanguage.googleapis.com/v1beta/models/{model}:generateContent` with `inlineData` image + system prompt + scrubbed history) and **HuggingFace Inference API** (`router.huggingface.co` / `api-inference.huggingface.co` OpenAI-compatible chat completions payload for `google/medgemma-1.5-4b-it`), plus `synthesize_offline_grounded_reply(...)` fallback when no key is present.
+  - `assert_zero_pii_and_extract_image(dataset: Dataset) -> str`: enforces `ComplianceScanner().scan_dataset(dataset).is_compliant` (raising `ValueError` caught by route as `HTTPException(status_code=422)`) and `getattr(dataset, "BurnedInAnnotation", None) == "NO"`, then converts normalized monochrome `PixelData` directly into a clean `<= 768×768` RGB PNG base64 string (zero DICOM tags forwarded).
+  - `ScanChatService.generate_reply(...)` executes `assert_zero_pii_and_extract_image(dataset)`, scrubs `user_message` and `conversation_history` (last 6 turns), uses `heatmap_pil` (the blended anonymized Grad-CAM PNG encoded cleanly as RGB PNG base64) when provided alongside a spatial peak zone summary, and calls async `httpx` **Gemini Multimodal API** (`generativelanguage.googleapis.com/v1beta/models/{model}:generateContent` passing clean `inlineData` parts) OR **HuggingFace Router API** (`google/medgemma-1.5-4b-it`), falling back deterministically via `synthesize_offline_grounded_reply(...)` when no key is set.
 
 - [ ] **Step 5: Run unit tests to verify pass**
   Run: `pytest tests/test_scan_chat.py -v`
@@ -137,7 +137,7 @@ def test_chat_endpoint_rejects_shredded_study_with_410_and_never_leaks_phi(monke
   2. Decrypt via `decrypt_envelope(enc_blob, _dashboard_kms)` -> catch revocation -> raise `HTTPException(status_code=410, detail=...)`.
   3. Parse `pydicom.dcmread(io.BytesIO(decrypted_bytes), force=True)`.
   4. Never access `_dashboard_session_cache`.
-  5. Compute/retrieve classifier predictions from `_dashboard_engine.predict(cleaned_ds)` (plus optionally scrubbed Grad-CAM blend when `include_heatmap_overlay=True`) and delegate to `ScanChatService.generate_reply(...)`.
+  5. Compute classifier predictions from `pred_result = _dashboard_engine.predict(cleaned_ds)`. Resolve `target_pathology = req.target_pathology` (defaulting to highest-probability class in `pred_result["predictions"]`), and if `req.include_heatmap_overlay` is `True`, generate `heatmap_pil = _dashboard_engine.generate_heatmap_image(cleaned_ds, target_pathology)` (otherwise `heatmap_pil = None`). Call `reply = await ScanChatService.generate_reply(dataset=cleaned_ds, user_message=req.user_message, predictions=pred_result, target_pathology=target_pathology, conversation_history=req.conversation_history, heatmap_pil=heatmap_pil)` and return `ScanChatResponse(scan_id=req.scan_id, **reply)`.
 
 - [ ] **Step 5: Run full backend test suite**
   Run: `pytest tests/ -v`
@@ -157,11 +157,11 @@ def test_chat_endpoint_rejects_shredded_study_with_410_and_never_leaks_phi(monke
 **Interfaces:**
 - Produces: `<ScanChatDrawer />` reading `chatOpen`, `chatMessagesByStudy[uid]`, `activeStudy` from `useWorkstationStore`
 
-- [ ] **Step 1: Install `@radix-ui/react-dialog` and define TypeScript API types + `sendScanChatMessage` in `api.ts`**
-  Add `ScanChatTurn`, `ScanChatRequest`, `ScanChatResponse` to `types/clinical.ts` and `sendScanChatMessage` using the existing `fetch` error-handling wrapper in `lib/api.ts`.
+- [ ] **Step 1: Install `@radix-ui/react-dialog` and define TypeScript API types + `ApiError` + `sendScanChatMessage` in `api.ts`**
+  Add `ScanChatTurn` (`role: 'user' | 'assistant'`), `ScanChatMessage` (UI message with `id`, `'user' | 'assistant' | 'system'`, `provider_used?`, `grounded_findings?`, `timestamp`, `isError?`), `ScanChatRequest`, and `ScanChatResponse` to `types/clinical.ts`. Export `class ApiError extends Error { readonly status: number }` in `lib/api.ts` and update `safeApiRequest` to throw `new ApiError(msg, res.status)` before implementing `sendScanChatMessage`.
 
 - [ ] **Step 2: Add per-study chat store state & `askScanQuestion` action to `useWorkstationStore.ts`**
-  Track `chatOpen`, `isChatSending`, and `chatMessagesByStudy: Record<string, ScanChatMessage[]>`; handle HTTP `410` gracefully by adding a system erasure block message and refreshing `worklist`.
+  Track `chatOpen`, `isChatSending`, and `chatMessagesByStudy: Record<string, ScanChatMessage[]>`; serialize only `role !== 'system' && !isError` turns sliced to the last 6 into `ScanChatTurn[]`; set `include_heatmap_overlay: true` when heatmap overlay is active or when invoked via `"What did the heatmap highlight?"`; catch `err instanceof ApiError && err.status === 410` cleanly to append a DPDP Sec. 12 erasure system notice and refresh `worklist`.
 
 - [ ] **Step 3: Build daylight `<Sheet />` (`ui/sheet.tsx`) and `<ScanChatDrawer />` (`diagnostics/ScanChatDrawer.tsx`)**
   Bind exclusively to existing semantic CSS variables (`bg-bg-panel`, `bg-bg-input`, `bg-bg-backdrop`, `bg-accent-brand-soft`, `border-border-strong`, matte slate text inks). Include:
@@ -173,7 +173,9 @@ def test_chat_endpoint_rejects_shredded_study_with_410_and_never_leaks_phi(monke
     3. `"Next recommended clinical steps"`
   - Scrollable conversation list + IME-safe `Enter` submit handler (`isComposing || keyCode === 229`)
 
-- [ ] **Step 4: Add `"Ask AI About This Scan"` trigger button inside Card 2 (`OverviewPage.tsx`) & header utility (`WorkstationPage.tsx`) + mount `<ScanChatDrawer />` in `App.tsx`**
+- [ ] **Step 4: Add `"Ask AI About This Scan"` trigger button inside Card 2 header (`OverviewPage.tsx`) & header utility (`WorkstationPage.tsx`) + mount `<ScanChatDrawer />` inside `<BrowserRouter>` and guard global hotkeys in `App.tsx`**
+  - Place `"Ask AI About This Scan"` in `OverviewPage.tsx` Card 2's always-rendered header utility slot (keeping the empty state clean with a disabled tooltip until a study is analyzed or when crypto-shredded).
+  - Mount `<ScanChatDrawer />` inside `<BrowserRouter>` in `App.tsx` and return early inside the global `keydown` handler whenever `useWorkstationStore.getState().chatOpen` is `true` so `1`/`2`/`3`/`I`/`+`/`-`/`0` hotkeys do not intercept typing or chip navigation.
 
 - [ ] **Step 5: Run design-system & TypeScript build checks**
   Run:
@@ -192,3 +194,4 @@ def test_chat_endpoint_rejects_shredded_study_with_410_and_never_leaks_phi(monke
   4. Verify responsive full-width mobile sheet (`390×844`) closes on `Escape` and returns focus cleanly.
 
 - [ ] **Step 2: Inspect rendered drawer screenshots visually & confirm 0 console/page/HTTP 5xx errors**
+

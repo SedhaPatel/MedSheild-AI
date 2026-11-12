@@ -267,6 +267,6 @@ pytest --cov=medshield --cov-report=term-missing tests/
 
 **Architectural Summary:**
 - Exposes `POST /api/chat` (plus alias `POST /api/v1/dashboard/chat`, exempted cleanly alongside `/api/v1/dashboard` in [`MTLSAuthMiddleware`](file:///d:/ISC-Project/medshield/api/middleware/mtls_auth.py#L20)).
-- Enforces **5-layer Zero-PII isolation**: never reads `_dashboard_session_cache`, decrypts solely from `EncryptedStore` via `decrypt_envelope()` (returning `HTTP 410 Gone` after DPDP crypto-shredding), re-verifies `ComplianceScanner().audit_dataset(...)` + `BurnedInAnnotation == "NO"`, strips accidental PII from free-text `user_message` via `redact_chat_pii`, and grounds replies strictly on DenseNet-121 predictions + medical disclaimers using `httpx` (supporting `gemini-2.5-flash` Multimodal or HuggingFace `google/medgemma-1.5-4b-it`, with deterministic offline fallback).
+- Enforces **5-layer Zero-PII isolation**: never reads `_dashboard_session_cache`, decrypts solely from `EncryptedStore` via `decrypt_envelope()` (returning `HTTP 410 Gone` after DPDP crypto-shredding), re-verifies `ComplianceScanner().scan_dataset(...)` + `BurnedInAnnotation == "NO"`, strips accidental PII from free-text `user_message` via `redact_chat_pii`, and grounds replies strictly on DenseNet-121 predictions + medical disclaimers using `httpx` (supporting `gemini-2.5-flash` Multimodal or HuggingFace `google/medgemma-1.5-4b-it`, with deterministic offline fallback).
 
 
