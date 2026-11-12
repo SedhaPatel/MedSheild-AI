@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react'
 import {
   AlertCircle,
   AlertTriangle,
@@ -39,6 +45,113 @@ function formatTimestamp(ts: number): string {
   }
 }
 
+function parseInlineFormatting(text: string): ReactNode[] {
+  // Matches ***bold italic***, **bold**, *italic*, or `code`
+  const tokenRegex = /(\*\*\*[^*]+?\*\*\*|\*\*[^*]+?\*\*|\*[^*\n]+?\*|`[^`\n]+?`)/g
+  const parts = text.split(tokenRegex)
+
+  return parts.map((part, index) => {
+    if (!part) return null
+    if (part.startsWith('***') && part.endsWith('***') && part.length > 6) {
+      return (
+        <strong key={index} className="font-semibold text-text-primary">
+          <em className="italic">{part.slice(3, -3)}</em>
+        </strong>
+      )
+    }
+    if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+      return (
+        <strong key={index} className="font-semibold text-text-primary">
+          {part.slice(2, -2)}
+        </strong>
+      )
+    }
+    if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
+      return (
+        <em key={index} className="italic">
+          {part.slice(1, -1)}
+        </em>
+      )
+    }
+    if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
+      return (
+        <code
+          key={index}
+          className="rounded border border-border-subtle bg-bg-panel px-1 py-0.5 font-mono text-[11px] text-text-primary"
+        >
+          {part.slice(1, -1)}
+        </code>
+      )
+    }
+    return part
+  })
+}
+
+function FormattedMessage({ content }: { content: string }) {
+  const lines = content.split('\n')
+  const blocks: ReactNode[] = []
+  let currentListItems: ReactNode[] = []
+
+  const flushList = () => {
+    if (currentListItems.length > 0) {
+      blocks.push(
+        <ul
+          key={`ul-${blocks.length}`}
+          className="my-1.5 space-y-1 pl-4 list-disc marker:text-text-muted"
+        >
+          {currentListItems}
+        </ul>
+      )
+      currentListItems = []
+    }
+  }
+
+  lines.forEach((line, lineIndex) => {
+    const trimmed = line.trim()
+
+    if (!trimmed) {
+      flushList()
+      return
+    }
+
+    const bulletMatch = trimmed.match(/^[-*]\s+(.*)$/)
+    if (bulletMatch) {
+      const itemContent = bulletMatch[1]
+      currentListItems.push(
+        <li key={`li-${lineIndex}`} className="leading-relaxed">
+          {parseInlineFormatting(itemContent)}
+        </li>
+      )
+      return
+    }
+
+    flushList()
+
+    const headingMatch = trimmed.match(/^#{1,4}\s+(.*)$/)
+    if (headingMatch) {
+      blocks.push(
+        <div
+          key={`h-${lineIndex}`}
+          className="mt-2 mb-1 font-display text-xs font-semibold text-text-primary"
+        >
+          {parseInlineFormatting(headingMatch[1])}
+        </div>
+      )
+      return
+    }
+
+    blocks.push(
+      <p key={`p-${lineIndex}`} className="leading-relaxed">
+        {parseInlineFormatting(trimmed)}
+      </p>
+    )
+  })
+
+  flushList()
+
+  return <div className="space-y-1.5">{blocks}</div>
+}
+
 export function ScanChatDrawer() {
   const chatOpen = useWorkstationStore((s) => s.chatOpen)
   const setChatOpen = useWorkstationStore((s) => s.setChatOpen)
@@ -50,6 +163,7 @@ export function ScanChatDrawer() {
 
   const [inputValue, setInputValue] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const latestMessageRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const isShredded = Boolean(
@@ -67,8 +181,12 @@ export function ScanChatDrawer() {
   const topFinding = activeStudy?.ai_diagnostics.predictions[0]
 
   useEffect(() => {
-    if (chatOpen) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (!chatOpen) return
+
+    if (isChatSending) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    } else if (messages.length > 0) {
+      latestMessageRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }
   }, [chatOpen, messages.length, isChatSending])
 
@@ -165,7 +283,7 @@ export function ScanChatDrawer() {
         </div>
 
         {/* Scrollable Conversation Thread */}
-        <div className="flex flex-1 flex-col gap-3 overflow-y-auto bg-bg-panel p-4">
+        <div className="flex flex-1 flex-col gap-3 overflow-y-auto bg-bg-panel p-4 scroll-pt-4">
           {messages.length === 0 ? (
             <div className="my-auto flex flex-col items-center justify-center space-y-4 text-center">
               <div className="flex h-12 w-12 items-center justify-center rounded-full border border-accent-brand-border bg-accent-brand-soft">
@@ -208,11 +326,14 @@ export function ScanChatDrawer() {
             </div>
           ) : (
             <>
-              {messages.map((message) => {
+              {messages.map((message, idx) => {
+                const isLatest = idx === messages.length - 1
+
                 if (message.role === 'user') {
                   return (
                     <div
                       key={message.id}
+                      ref={isLatest ? latestMessageRef : undefined}
                       className="ml-auto max-w-[85%] rounded-[var(--panel-radius)] border border-accent-brand-border bg-accent-brand-soft p-3 text-xs leading-relaxed text-text-primary"
                     >
                       <div className="whitespace-pre-wrap">{message.content}</div>
@@ -227,9 +348,10 @@ export function ScanChatDrawer() {
                   return (
                     <div
                       key={message.id}
+                      ref={isLatest ? latestMessageRef : undefined}
                       className="mr-auto max-w-[92%] space-y-2 rounded-[var(--panel-radius)] border border-border-subtle bg-bg-canvas p-3 text-xs leading-relaxed text-text-primary"
                     >
-                      <div className="whitespace-pre-wrap">{message.content}</div>
+                      <FormattedMessage content={message.content} />
 
                       <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-border-subtle">
                         <Badge variant="neutral" className="text-[10px]">
@@ -266,6 +388,7 @@ export function ScanChatDrawer() {
                 return (
                   <div
                     key={message.id}
+                    ref={isLatest ? latestMessageRef : undefined}
                     className={cn(
                       'flex items-start gap-2.5 rounded-[var(--panel-radius)] border p-3 text-xs leading-relaxed',
                       message.isError
@@ -300,14 +423,14 @@ export function ScanChatDrawer() {
 
         {/* Quick Question Shortcut Strip when thread has messages */}
         {messages.length > 0 && !isShredded && activeStudy && (
-          <div className="flex items-center gap-1.5 overflow-x-auto border-t border-border-subtle bg-bg-panel px-3 py-1.5">
+          <div className="flex flex-wrap items-center gap-1.5 border-t border-border-subtle bg-bg-panel px-3 py-2">
             {QUICK_QUESTIONS.map((question) => (
               <button
                 key={question}
                 type="button"
                 disabled={isChatSending}
                 onClick={() => handleQuickQuestionClick(question)}
-                className="shrink-0 rounded-full border border-border-strong bg-bg-canvas px-2.5 py-1 text-[11px] font-medium text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors disabled:opacity-50"
+                className="rounded-full border border-border-strong bg-bg-canvas px-2.5 py-1 text-left text-[11px] font-medium text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors disabled:opacity-50"
               >
                 {question}
               </button>
