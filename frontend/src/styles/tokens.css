@@ -1,98 +1,61 @@
-/* Design Tokens - Auto-generated */
-/* Do not edit directly - modify tokens.json instead */
+/*
+ * MedShield design tokens: quiet clinical, light.
+ * Neutral grays, one accent (blue) for interaction, and red / amber / green reserved
+ * for clinical status. Keep tokens.json in sync (documentation only; not read by the build).
+ */
 
-/* === PRIMITIVES === */
 :root {
-  --primitive-surface-canvas: #F8FAFC;
-  --primitive-surface-panel: #FFFFFF;
-  --primitive-surface-elevated: #F1F5F9;
-  --primitive-surface-input: #F8FAFC;
-  --primitive-surface-tint: #F2F8F6;
-  --primitive-surface-lightbox: #EEF3F8;
-  --primitive-surface-backdrop: rgba(241, 245, 249, 0.82);
-  --primitive-ink-primary: #1E293B;
-  --primitive-ink-secondary: #475569;
-  --primitive-ink-muted: #64748B;
-  --primitive-ink-inverse: #FFFFFF;
-  --primitive-signal-brand: #0284C7;
-  --primitive-signal-brand-hover: #0369A1;
-  --primitive-signal-brand-soft: #E0F2FE;
-  --primitive-signal-brand-border: #BAE6FD;
-  --primitive-signal-teal: #0F766E;
-  --primitive-signal-teal-soft: #F0FDFA;
-  --primitive-signal-teal-border: #99F6E4;
-  --primitive-signal-emerald: #047857;
-  --primitive-signal-emerald-soft: #ECFDF5;
-  --primitive-signal-emerald-border: #A7F3D0;
-  --primitive-signal-amber: #B45309;
-  --primitive-signal-amber-soft: #FFFBEB;
-  --primitive-signal-amber-border: #FDE68A;
-  --primitive-signal-crimson: #B91C1C;
-  --primitive-signal-crimson-soft: #FEF2F2;
-  --primitive-signal-crimson-border: #FECACA;
-  --primitive-signal-cobalt: #0369A1;
-  --primitive-signal-cobalt-soft: #EFF6FF;
-  --primitive-signal-cobalt-border: #BFDBFE;
-  --primitive-hairline-subtle: #E2E8F0;
-  --primitive-hairline-strong: #CBD5E1;
-  --primitive-hairline-focus: #0284C7;
-  --primitive-hairline-film: #CBD5E1;
-  --primitive-space-1: 4px;
-  --primitive-space-2: 8px;
-  --primitive-space-3: 12px;
-  --primitive-space-4: 16px;
-  --primitive-space-5: 20px;
-  --primitive-space-6: 24px;
-  --primitive-radius-viewport: 6px;
-  --primitive-radius-control: 8px;
-  --primitive-radius-panel: 12px;
-  --primitive-radius-dialog: 14px;
-}
-
-/* === SEMANTIC === */
-:root {
-  --bg-canvas: #F8FAFC;
+  /* Surfaces */
+  --bg-canvas: #F5F6F8;
   --bg-panel: #FFFFFF;
-  --bg-elevated: #F1F5F9;
-  --bg-input: #F8FAFC;
-  --bg-tint: #F2F8F6;
-  --bg-lightbox: #EEF3F8;
-  --bg-backdrop: rgba(241, 245, 249, 0.82);
-  --text-primary: #1E293B;
-  --text-secondary: #475569;
-  --text-muted: #64748B;
-  --text-inverse: #FFFFFF;
-  --accent-brand: #0284C7;
-  --accent-brand-hover: #0369A1;
-  --accent-brand-soft: #E0F2FE;
-  --accent-brand-border: #BAE6FD;
-  --accent-teal: #0F766E;
-  --accent-teal-soft: #F0FDFA;
-  --accent-teal-border: #99F6E4;
-  --accent-verified: #047857;
-  --accent-verified-soft: #ECFDF5;
-  --accent-verified-border: #A7F3D0;
-  --accent-attention: #B45309;
-  --accent-attention-soft: #FFFBEB;
-  --accent-attention-border: #FDE68A;
-  --accent-critical: #B91C1C;
-  --accent-critical-soft: #FEF2F2;
-  --accent-critical-border: #FECACA;
-  --accent-info: #0369A1;
-  --accent-info-soft: #EFF6FF;
-  --accent-info-border: #BFDBFE;
-  --border-subtle: #E2E8F0;
-  --border-strong: #CBD5E1;
-  --border-focus: #0284C7;
-  --border-film: #CBD5E1;
-}
+  --bg-elevated: #EFF1F4;
+  --bg-input: #FFFFFF;
+  --bg-tint: #F5F6F8;
+  --bg-lightbox: #E8EAED;
+  --bg-backdrop: rgba(22, 25, 29, 0.32);
 
-/* === COMPONENTS === */
-:root {
-  --panel-radius: 12px;
-  --control-radius: 8px;
-  --viewport-radius: 6px;
-  --dialog-radius: 14px;
+  /* Text */
+  --text-primary: #16191D;
+  --text-secondary: #464E5A;
+  --text-muted: #6A717C;
+  --text-inverse: #FFFFFF;
+
+  /* Interaction accent (the only decorative color) */
+  --accent-brand: #1F5FBF;
+  --accent-brand-hover: #194E9E;
+  --accent-brand-soft: #EDF2FA;
+  --accent-brand-border: #C7D5EE;
+
+  /* Status: reserved for clinical / security state */
+  --accent-critical: #B42318;
+  --accent-critical-soft: #FEF3F2;
+  --accent-critical-border: #F5C2BE;
+  --accent-attention: #A15C07;
+  --accent-attention-soft: #FFF8EB;
+  --accent-attention-border: #F2D59B;
+  --accent-verified: #087443;
+  --accent-verified-soft: #EEF8F2;
+  --accent-verified-border: #B5DEC7;
+
+  /* Legacy aliases: info -> accent, teal -> neutral (no extra hues) */
+  --accent-info: var(--accent-brand);
+  --accent-info-soft: var(--accent-brand-soft);
+  --accent-info-border: var(--accent-brand-border);
+  --accent-teal: var(--text-secondary);
+  --accent-teal-soft: var(--bg-elevated);
+  --accent-teal-border: var(--border-subtle);
+
+  /* Lines */
+  --border-subtle: #E2E5E9;
+  --border-strong: #C9CED6;
+  --border-focus: #1F5FBF;
+  --border-film: #C9CED6;
+
+  /* Shape & rhythm */
+  --panel-radius: 6px;
+  --control-radius: 4px;
+  --viewport-radius: 2px;
+  --dialog-radius: 8px;
   --panel-padding: 16px;
   --control-gap: 8px;
 }

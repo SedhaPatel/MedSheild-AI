@@ -1,4 +1,3 @@
-import { Trash2 } from 'lucide-react'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -11,6 +10,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { Panel } from '@/components/layout/Panel'
 import { useWorkstationStore } from '@/stores/useWorkstationStore'
 
 export function CryptoShredDialog() {
@@ -24,54 +24,31 @@ export function CryptoShredDialog() {
   )
 
   return (
-    <section
-      aria-label="DPDP Right to Erasure"
-      className="overflow-hidden rounded-[var(--panel-radius)] border border-border-subtle bg-bg-panel"
-    >
-      <div className="flex items-center justify-between border-b border-border-subtle bg-bg-input px-4 py-3">
-        <div className="flex items-center gap-2 text-[13px] font-semibold text-text-primary">
-          <Trash2 className="h-4 w-4 text-accent-critical" aria-hidden="true" />
-          <span>Right to Erasure</span>
-        </div>
-        <span className="text-[11px] font-medium text-text-muted">DPDP Sec. 12</span>
-      </div>
-
-      <div className="space-y-2.5 p-3.5">
-        <div
-          className={
-            isShredded
-              ? 'font-mono text-[11px] font-semibold text-accent-critical'
-              : 'font-mono text-[11px] text-text-muted'
-          }
-        >
+    <Panel title="Erase study" aside="DPDP Act Sec. 12">
+      <div className="space-y-3 px-4 py-3 text-[13px]">
+        <p className={isShredded ? 'text-accent-critical' : 'text-text-secondary'}>
           {isShredded
-            ? 'Crypto-shredded. Study KEK destroyed.'
-            : activeStudy
-              ? `Key: ${activeStudy.security.kms_master_key_id.slice(-22)}`
-              : 'Study key isolated per UID'}
-        </div>
-
+            ? 'Erased. The study key was destroyed and the stored file can no longer be decrypted.'
+            : 'Destroys this study\'s encryption key. The stored file stays on disk but becomes unreadable. Other studies are not affected.'}
+        </p>
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <Button
               variant="destructive"
-              className="w-full"
               disabled={!activeStudy || isShredded}
             >
-              Crypto-Shred Study
+              Erase study…
             </Button>
           </AlertDialogTrigger>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>
-                Confirm Irreversible Cryptographic Erasure
+                Erase this study?
               </AlertDialogTitle>
               <AlertDialogDescription>
-                Under India DPDP Act 2023 Section 12, this destroys the study-scoped Master KEK (
-                <span className="font-mono text-text-primary">
-                  {activeStudy?.security.kms_master_key_id.slice(-24)}
-                </span>
-                ) by overwriting key bytes with zeroes. Other ingested studies remain unaffected, while this study&apos;s DICOM payload becomes permanently undecryptable noise.
+                This destroys the encryption key for{' '}
+                <span className="font-medium text-text-primary">{activeStudy?.file_name}</span> (right to erasure,
+                India DPDP Act 2023 Sec. 12). The stored file can never be decrypted again. This cannot be undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -85,14 +62,14 @@ export function CryptoShredDialog() {
                     void cryptoShredActiveStudy()
                   }}
                 >
-                  Destroy Study Key
+                  Erase permanently
                 </Button>
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
       </div>
-    </section>
+    </Panel>
   )
 }
 

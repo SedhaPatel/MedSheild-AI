@@ -5,18 +5,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react'
-import {
-  AlertCircle,
-  AlertTriangle,
-  ChevronRight,
-  Loader2,
-  MessageSquareText,
-  Send,
-  ShieldCheck,
-  Sparkles,
-  X,
-} from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
+import { AlertCircle, ChevronRight, Loader2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Sheet,
@@ -26,15 +15,16 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
+import { describeScore, rankPredictions } from '@/lib/scores'
 import {
   selectIsActiveStudyShredded,
   useWorkstationStore,
 } from '@/stores/useWorkstationStore'
 
 const QUICK_QUESTIONS = [
-  'Explain this finding in simple terms',
-  'What did the heatmap highlight?',
-  'Next recommended clinical steps',
+  'Explain the result in simple terms',
+  'Where is the heatmap focused?',
+  'How reliable is this result?',
 ] as const
 
 function formatTimestamp(ts: number): string {
@@ -94,16 +84,21 @@ function FormattedMessage({ content }: { content: string }) {
   const lines = content.split('\n')
   const blocks: ReactNode[] = []
   let currentListItems: ReactNode[] = []
+  let currentListOrdered = false
 
   const flushList = () => {
     if (currentListItems.length > 0) {
+      const ListTag = currentListOrdered ? 'ol' : 'ul'
       blocks.push(
-        <ul
-          key={`ul-${blocks.length}`}
-          className="my-1.5 space-y-1 pl-4 list-disc marker:text-text-muted"
+        <ListTag
+          key={`list-${blocks.length}`}
+          className={cn(
+            'my-1.5 space-y-1 pl-5 marker:text-text-muted',
+            currentListOrdered ? 'list-decimal' : 'list-disc'
+          )}
         >
           {currentListItems}
-        </ul>
+        </ListTag>
       )
       currentListItems = []
     }
@@ -118,8 +113,13 @@ function FormattedMessage({ content }: { content: string }) {
     }
 
     const bulletMatch = trimmed.match(/^[-*]\s+(.*)$/)
-    if (bulletMatch) {
-      const itemContent = bulletMatch[1]
+    const orderedMatch = bulletMatch ? null : trimmed.match(/^\d+\.\s+(.*)$/)
+    const listMatch = bulletMatch ?? orderedMatch
+    if (listMatch) {
+      const ordered = Boolean(orderedMatch)
+      if (currentListItems.length > 0 && ordered !== currentListOrdered) flushList()
+      currentListOrdered = ordered
+      const itemContent = listMatch[1]
       currentListItems.push(
         <li key={`li-${lineIndex}`} className="leading-relaxed">
           {parseInlineFormatting(itemContent)}
@@ -135,7 +135,7 @@ function FormattedMessage({ content }: { content: string }) {
       blocks.push(
         <div
           key={`h-${lineIndex}`}
-          className="mt-2 mb-1 font-display text-xs font-semibold text-text-primary"
+          className="mt-2 mb-1 font-semibold text-text-primary"
         >
           {parseInlineFormatting(headingMatch[1])}
         </div>
@@ -172,7 +172,7 @@ export function ScanChatDrawer() {
   const scanId = activeStudy?.anonymous_study_instance_uid
   const messages = scanId ? chatMessagesByStudy[scanId] ?? [] : []
 
-  const topFinding = activeStudy?.ai_diagnostics.predictions[0]
+  const topFinding = activeStudy ? rankPredictions(activeStudy.ai_diagnostics.predictions)[0] : undefined
 
   useEffect(() => {
     if (!chatOpen) return
@@ -223,15 +223,9 @@ export function ScanChatDrawer() {
         aria-describedby="scan-chat-drawer-desc"
       >
         {/* Drawer Header */}
-        <SheetHeader className="flex flex-col gap-2.5 border-b border-border-subtle bg-bg-input p-4">
+        <SheetHeader className="flex flex-col gap-1 border-b border-border-subtle bg-bg-panel px-4 py-3">
           <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <MessageSquareText
-                className="h-4 w-4 text-accent-brand"
-                aria-hidden="true"
-              />
-              <SheetTitle>Ask AI About This Scan</SheetTitle>
-            </div>
+            <SheetTitle>Ask about this scan</SheetTitle>
             <Button
               variant="ghost"
               size="icon"
@@ -247,58 +241,29 @@ export function ScanChatDrawer() {
             Zero-PII conversational scan assistant for clinical explanation and evidence exploration.
           </SheetDescription>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="teal" className="gap-1">
-              <ShieldCheck className="h-3 w-3" aria-hidden="true" />
-              <span>Zero-PII Verified</span>
-            </Badge>
-
-            {activeStudy && topFinding ? (
-              <span className="font-mono text-[11px] text-text-secondary truncate max-w-[320px]">
-                {topFinding.pathology} &middot;{' '}
-                {(topFinding.probability * 100).toFixed(1)}% (&plusmn;
-                {topFinding.epistemic_uncertainty.toFixed(3)}) &middot; &hellip;
-                {activeStudy.anonymous_study_instance_uid.slice(-6)}
-              </span>
-            ) : (
-              <span className="font-mono text-[11px] text-text-muted">
-                No scan selected
-              </span>
-            )}
-          </div>
+          <p className="truncate text-xs text-text-muted">
+            {activeStudy && topFinding
+              ? `${activeStudy.file_name} · top finding ${topFinding.pathology}: ${describeScore(topFinding)}`
+              : 'No study open'}
+          </p>
         </SheetHeader>
 
         {/* Persistent Amber Clinical Scope Disclaimer */}
-        <div className="flex items-start gap-2 border-b border-accent-attention-border bg-accent-attention-soft px-4 py-2 text-[11px] leading-snug text-accent-attention">
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span>
-            AI explanations reflect anonymized model outputs only and do not establish a
-            clinical diagnosis.
-          </span>
-        </div>
+        <p className="border-b border-border-subtle bg-bg-canvas px-4 py-2 text-xs leading-snug text-text-secondary">
+          Answers are generated from the model&apos;s scores and heatmap for this study. They are not a diagnosis.
+        </p>
 
         {/* Scrollable Conversation Thread */}
         <div className="flex flex-1 flex-col gap-3 overflow-y-auto bg-bg-panel p-4 scroll-pt-4">
           {messages.length === 0 ? (
-            <div className="my-auto flex flex-col items-center justify-center space-y-4 text-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full border border-accent-brand-border bg-accent-brand-soft">
-                <Sparkles className="h-6 w-6 text-accent-brand" aria-hidden="true" />
-              </div>
+            <div className="space-y-3">
+              <p className="text-[13px] text-text-secondary">
+                Ask about the model&apos;s findings or the heatmap for this study. Only the de-identified image and
+                scores are used; DICOM metadata is never sent.
+              </p>
 
-              <div className="max-w-xs space-y-1">
-                <h3 className="font-display text-sm font-semibold text-text-primary">
-                  Evidence-Grounded Scan Assistant
-                </h3>
-                <p className="text-xs text-text-secondary">
-                  Ask questions about the scrubbed radiograph, DenseNet-121 model
-                  findings, or Grad-CAM spatial heatmaps. Zero DICOM metadata leaves the enclave.
-                </p>
-              </div>
-
-              <div className="w-full space-y-2 pt-2">
-                <p className="text-[11px] font-medium text-text-muted uppercase tracking-wider text-left">
-                  Suggested Questions
-                </p>
+              <div className="space-y-1.5">
+                <p className="text-xs text-text-muted">Try asking</p>
                 <div className="flex flex-col gap-1.5">
                   {QUICK_QUESTIONS.map((question) => (
                     <button
@@ -307,8 +272,8 @@ export function ScanChatDrawer() {
                       disabled={!activeStudy || isShredded || isChatSending}
                       onClick={() => handleQuickQuestionClick(question)}
                       className={cn(
-                        'flex items-center justify-between gap-2 rounded-full border border-border-strong bg-bg-canvas px-3.5 py-2 text-left text-xs font-medium text-text-primary transition-colors',
-                        'hover:bg-bg-elevated hover:border-accent-brand-border',
+                        'flex w-full cursor-pointer items-center justify-between gap-2 rounded-[var(--control-radius)] border border-border-subtle bg-bg-panel px-3 py-2 text-left text-[13px] text-text-primary transition-colors',
+                        'hover:border-border-strong hover:bg-bg-elevated',
                         'disabled:pointer-events-none disabled:opacity-50'
                       )}
                     >
@@ -329,7 +294,7 @@ export function ScanChatDrawer() {
                     <div
                       key={message.id}
                       ref={isLatest ? latestMessageRef : undefined}
-                      className="ml-auto max-w-[85%] rounded-[var(--panel-radius)] border border-accent-brand-border bg-accent-brand-soft p-3 text-xs leading-relaxed text-text-primary"
+                      className="ml-auto max-w-[85%] rounded-[var(--panel-radius)] bg-bg-elevated px-3 py-2 text-[13px] leading-relaxed text-text-primary"
                     >
                       <div className="whitespace-pre-wrap">{message.content}</div>
                       <div className="mt-1 text-right text-[10px] text-text-muted">
@@ -344,37 +309,16 @@ export function ScanChatDrawer() {
                     <div
                       key={message.id}
                       ref={isLatest ? latestMessageRef : undefined}
-                      className="mr-auto max-w-[92%] space-y-2 rounded-[var(--panel-radius)] border border-border-subtle bg-bg-canvas p-3 text-xs leading-relaxed text-text-primary"
+                      className="mr-auto max-w-full space-y-2 text-[13px] leading-relaxed text-text-primary"
                     >
                       <FormattedMessage content={message.content} />
 
-                      <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-border-subtle">
-                        <Badge variant="neutral" className="text-[10px]">
-                          Grounded: DenseNet-121
-                        </Badge>
-                        {message.provider_used && (
-                          <Badge variant="info" className="text-[10px]">
-                            {message.provider_used}
-                          </Badge>
-                        )}
-                        <span className="ml-auto text-[10px] text-text-muted">
-                          {formatTimestamp(message.timestamp)}
-                        </span>
-                      </div>
-
-                      {message.grounded_findings &&
-                        message.grounded_findings.length > 0 && (
-                          <div className="flex flex-wrap gap-1 pt-0.5">
-                            {message.grounded_findings.map((f, i) => (
-                              <span
-                                key={i}
-                                className="rounded border border-border-subtle bg-bg-panel px-1.5 py-0.5 text-[10px] text-text-secondary"
-                              >
-                                {f}
-                              </span>
-                            ))}
-                          </div>
-                        )}
+                      <p className="border-t border-border-subtle pt-1.5 text-xs text-text-muted">
+                        {message.provider_used === 'grounded-local-fallback'
+                          ? 'Built-in summary (no external model)'
+                          : `Model: ${message.provider_used ?? 'unknown'}`}{' '}
+                        &middot; {formatTimestamp(message.timestamp)}
+                      </p>
                     </div>
                   )
                 }
@@ -385,7 +329,7 @@ export function ScanChatDrawer() {
                     key={message.id}
                     ref={isLatest ? latestMessageRef : undefined}
                     className={cn(
-                      'flex items-start gap-2.5 rounded-[var(--panel-radius)] border p-3 text-xs leading-relaxed',
+                      'flex items-start gap-2.5 rounded-[var(--panel-radius)] border px-3 py-2 text-[13px] leading-relaxed',
                       message.isError
                         ? 'border-accent-critical-border bg-accent-critical-soft text-accent-critical'
                         : 'border-border-subtle bg-bg-elevated text-text-secondary'
@@ -394,9 +338,7 @@ export function ScanChatDrawer() {
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
                     <div className="flex-1 space-y-1">
                       <p className="font-semibold">
-                        {message.isError
-                          ? 'Right-to-Erasure Notice (DPDP Sec. 12)'
-                          : 'Notice'}
+                        {message.title ?? (message.isError ? 'Request failed' : 'Notice')}
                       </p>
                       <p>{message.content}</p>
                     </div>
@@ -405,9 +347,9 @@ export function ScanChatDrawer() {
               })}
 
               {isChatSending && (
-                <div className="mr-auto flex items-center gap-2 rounded-[var(--panel-radius)] border border-border-subtle bg-bg-canvas px-3 py-2 text-xs text-text-muted">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-accent-brand" />
-                  <span>Analyzing scan with Zero-PII model...</span>
+                <div className="mr-auto flex items-center gap-2 text-[13px] text-text-muted">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>Working…</span>
                 </div>
               )}
             </>
@@ -425,7 +367,7 @@ export function ScanChatDrawer() {
                 type="button"
                 disabled={isChatSending}
                 onClick={() => handleQuickQuestionClick(question)}
-                className="rounded-full border border-border-strong bg-bg-canvas px-2.5 py-1 text-left text-[11px] font-medium text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors disabled:opacity-50"
+                className="cursor-pointer rounded-[var(--control-radius)] border border-border-subtle bg-bg-panel px-2 py-1 text-left text-xs text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary disabled:opacity-50"
               >
                 {question}
               </button>
@@ -434,7 +376,7 @@ export function ScanChatDrawer() {
         )}
 
         {/* Composer Footer */}
-        <div className="flex flex-col gap-2 border-t border-border-subtle bg-bg-input p-3">
+        <div className="flex flex-col gap-2 border-t border-border-subtle bg-bg-panel p-3">
           <div className="relative">
             <textarea
               ref={textareaRef}
@@ -448,20 +390,19 @@ export function ScanChatDrawer() {
                 !activeStudy
                   ? 'Upload or select a scan first...'
                   : isShredded
-                    ? 'Study erased under DPDP Sec. 12'
-                    : 'Ask about this scan... (Enter to send, Shift+Enter for new line)'
+                    ? 'This study was erased'
+                    : 'Ask a question (Enter to send, Shift+Enter for a new line)'
               }
               className={cn(
-                'w-full resize-none rounded-[var(--control-radius)] border border-border-strong bg-bg-panel p-2.5 text-xs text-text-primary placeholder:text-text-muted focus-visible:outline-2 focus-visible:outline-border-focus',
+                'w-full resize-none rounded-[var(--control-radius)] border border-border-strong bg-bg-panel p-2.5 text-[13px] text-text-primary placeholder:text-text-muted focus-visible:outline-2 focus-visible:outline-border-focus',
                 'disabled:cursor-not-allowed disabled:bg-bg-elevated disabled:opacity-60'
               )}
             />
           </div>
 
           <div className="flex items-center justify-between gap-2">
-            <p className="text-[10px] leading-tight text-text-muted">
-              Do not enter patient names, DOBs, or MRNs. Accidental identifiers are
-              stripped before model egress.
+            <p className="text-xs leading-tight text-text-muted">
+              Don&apos;t type names, dates of birth or record numbers. Common identifiers are removed before sending.
             </p>
 
             <Button
@@ -473,8 +414,7 @@ export function ScanChatDrawer() {
               onClick={handleSend}
               className="shrink-0 gap-1.5"
             >
-              <Send className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>Send</span>
+              Send
             </Button>
           </div>
         </div>
