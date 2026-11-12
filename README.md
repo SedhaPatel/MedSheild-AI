@@ -37,11 +37,11 @@ MedShield-AI maps directly to statutory healthcare data protection standards:
 |        +---> Metadata De-Identification Engine (DICOM PS 3.15 Annex E Basic Profile)             |
 |        |     - Safe Harbor: 18 HIPAA Identifiers Scrubbed (Action X/Z)                            |
 |        |     - UID Pseudonymization: Salted HMAC-SHA256 with '2.25.' root (Action U)              |
-|        |     - Date Shifting: Salted patient-level day offset preserving longitudinal RECIST      |
+|        |     - Date Shifting: Salted per-patient offset (DA + DT); see Safe Harbor note below     |
 |        |     - Sequence Cleaning & Vendor Private Tag Purging (Odd Group Numbers)                 |
 |        |                                                                                          |
 |        +---> Dual-Stage Pixel De-Identification Engine                                            |
-|              - Margin Bounding Box Text Detector (Ultrasound/Secondary Capture)                   |
+|              - Margin Text Detector: high-contrast overlays + top-hat stroke/text-line analysis   |
 |              - Safety Dilatation: >= 15% bounding-box padding covering descenders/ascenders       |
 |              - Pixel Inpainting: High-contrast text zeroed out; BurnedInAnnotation set to 'NO'    |
 |        |                                                                                          |
@@ -65,7 +65,7 @@ MedShield-AI maps directly to statutory healthcare data protection standards:
 |        +---> 16-Bit Normalization: Dynamic range windowing & MONOCHROME1 inversion                |
 |        +---> Deep Classifier: EfficientNet-V2-S / ConvNeXt-V2-Base                                |
 |        +---> Multi-Label Pathologies: Pneumonia, Cardiomegaly, Effusion, Pneumothorax, Atelectasis|
-|        +---> Uncertainty & Triage: Calibrated Epistemic Uncertainty + STAT Urgency Scoring        |
+|        +---> Triage: threshold-normalized scores (0.50 = operating point) + STAT Urgency Scoring  |
 |        +---> Explainability: Thread-safe Grad-CAM saliency heatmaps overlaid on native DICOM     |
 |        |                                                                                          |
 |        v                                                                                          |
@@ -80,7 +80,7 @@ MedShield-AI maps directly to statutory healthcare data protection standards:
 
 | Regulatory Authority & Provision | Statutory Requirement | MedShield-AI Implementation |
 | :--- | :--- | :--- |
-| **US HIPAA Privacy Rule §164.514(b)** | Safe Harbor De-identification (18 identifiers) | Automatic stripping of all 18 identifiers, recursive sequence sanitization, private vendor tag removal, and pixel text blackout. |
+| **US HIPAA Privacy Rule §164.514(b)** | Safe Harbor De-identification (18 identifiers) | Removal of identifier tags, recursive sequence sanitization, private vendor tag removal, and pixel text blackout. **Note:** dates are *shifted* per patient (preserving intervals) rather than reduced to year, so date handling meets the Expert Determination pathway (§164.514(b)(1)), not strict Safe Harbor (§164.514(b)(2)). |
 | **US HIPAA Security Rule §164.312(a)(2)(iv)** | Encryption and decryption of ePHI at rest | FIPS 140-3 compliant envelope encryption using AES-256-GCM (`MEDENC01` binary envelope). |
 | **US HIPAA Security Rule §164.312(e)(1)** | Transmission security for ePHI in transit | TLS 1.3 enforcing `TLS_AES_256_GCM_SHA384`, mandatory mTLS client cert validation, 0-RTT disabled. |
 | **India DPDP Act 2023 Section 8(5)** | Implementation of reasonable security safeguards | Zero-trust enclave processing, segregated pseudonymization database, and memory-only plaintext decryption. |
@@ -121,10 +121,11 @@ MedShield-AI serializes encrypted studies into an authenticated binary envelope:
   3. *Pleural Effusion* (costophrenic angle blunting)
   4. *Pneumothorax* (visceral pleural line visualization — *STAT Critical*)
   5. *Atelectasis* (volume loss / linear opacity)
-- **Triage Urgency Grading:**
-  - `STAT_CRITICAL`: Pneumothorax or Pneumonia detected with high confidence ($p \ge 0.70$). Flagged for immediate emergency radiologist notification.
-  - `ELEVATED`: Any target pathology detected at $p \ge 0.50$.
-  - `ROUTINE`: All pathology probabilities $< 0.50$.
+- **Model Scores (not probabilities):** Each finding's `probability` field is a *threshold-normalized score* using TorchXRayVision's tuned operating points: `0.50` is the model's decision threshold, so `>= 0.50` means positive (`is_positive`). The raw sigmoid output (`raw_score`) and threshold (`operating_threshold`) are also returned. The thresholds are low (≈0.01–0.10 raw) because these findings are rare in the training data, so neither number is a calibrated "% chance" of disease. Scores within 0.40–0.60 are borderline and can flip with cropping, compression or on-image annotations.
+- **Triage Urgency Grading** (on the score above):
+  - `STAT_CRITICAL`: Pneumothorax or Pneumonia scored $\ge 0.70$ (well above threshold). Flagged for immediate emergency radiologist notification.
+  - `ELEVATED`: Any target pathology positive (score $\ge 0.50$).
+  - `ROUTINE`: All scores $< 0.50$ (below threshold).
 - **Explainability (Grad-CAM):** Thread-safe Class Activation Mapping calculating gradients of the target class score with respect to the final convolutional layer, mapped to an RGB heatmap overlay blended ($\alpha=0.45$) with the normalized radiograph.
 - **Zero-PII Clinical Scan Chat (`medshield/ml/chat_service.py`):** Re-verifies HIPAA Safe Harbor compliance (`BurnedInAnnotation == "NO"`), strips accidental PII from clinician prompts/history, extracts sanitized PNG pixel frames (`<= 768x768`), and dispatches to **Gemini 2.5 Flash**, **MedGemma** (`google/medgemma-1.5-4b-it` via Hugging Face Router), or the deterministic `grounded-local-fallback` synthesizer when API keys are unset.
 
@@ -178,6 +179,8 @@ MEDSHIELD_STORAGE_PATH=./storage/encrypted_studies
 # Cryptographic Salt (MUST be a unique >=32-char secret when MEDSHIELD_ENVIRONMENT=production)
 MEDSHIELD_SECRET_PEPPER=replace-with-unique-random-secret-at-least-32-chars
 MEDSHIELD_KMS_MASTER_KEY_ID=arn:medshield:kms:local:key/master-kek-v1
+# Optional: persist local KMS keys so stored studies survive restarts (dev only)
+MEDSHIELD_KMS_KEYSTORE_PATH=./.kms/keystore.json
 
 # Security, mTLS & CORS
 MEDSHIELD_REQUIRE_MTLS=false
@@ -208,18 +211,20 @@ VITE_API_PROXY_TARGET=http://127.0.0.1:8000
 
 ---
 
-## 6. Clinical Portal & Security Workstation
+## 6. Web Interface
 
-MedShield-AI ships a **React 19 + TypeScript + Vite + Cornerstone3D** Daylight Clinical Portal (`frontend/`) alongside FastAPI's built-in `/dashboard` console:
+The React 19 + TypeScript + Vite + Cornerstone3D app in `frontend/` has three pages (design rules: [`.interface-design/system.md`](.interface-design/system.md)):
 
-- **Primary Development UI (`http://localhost:5173`):** Run FastAPI on port `8000` and Vite dev server on port `5173` (`npm --prefix frontend run dev`). Vite proxies `/api/*` requests to `VITE_API_PROXY_TARGET` (`http://127.0.0.1:8000`).
-- **Unified Single-Container UI (`http://localhost:8000/`):** Build `frontend/` (`npm --prefix frontend run build`) and set `MEDSHIELD_SERVE_FRONTEND=true` (with `MEDSHIELD_REQUIRE_MTLS=false`).
-- **Built-in FastAPI Console (`http://localhost:8000/dashboard`):** Available directly from FastAPI when `MEDSHIELD_SERVE_FRONTEND=false`.
-- **Key Workstation Capabilities:**
-  - **Drag-and-Drop / Clipboard Ingestion & 1-Click Samples:** Supports `.dcm` and `.png`/`.jpg` uploads plus pre-packaged reference studies (`patient_01_pneumonia`, `patient_02_effusion`, `patient_03_cardiomegaly`).
-  - **Interactive Cornerstone3D PACS Viewer (`/workstation`):** Streams decrypted sanitized Part 10 DICOMs via `wadouri:`, with Window/Level, Pan, Zoom, Invert, and synchronized Grad-CAM opacity overlays.
-  - **Security & Safe Harbor Vault (`/security`):** Side-by-side raw vs. pixel-redacted comparison, DICOM PS 3.15 tag diff matrix, `MEDENC01` AES-256-GCM inspection, Shannon entropy ($\ge 7.99$ bits/byte), and two-step DPDP Act §12 Crypto-Shredding.
-  - **Zero-PII Scan Chat Drawer:** Multimodal clinical Q&A grounded strictly in DenseNet-121 probabilities and Grad-CAM spatial localization.
+- **Studies (`/`):** upload a `.dcm`, `.png` or `.jpg` (drag and drop, browse, or paste with Ctrl+V) or load one of the three samples. Studies are listed by triage priority (STAT, Elevated, Routine, Erased) with search and filters; selecting one shows its image, heatmap toggle, findings, and a de-identification summary.
+- **Viewer (`/workstation`):** original, de-identified (Cornerstone3D `wadouri:` with window/level, pan, zoom, invert) and heatmap views, with the findings list and keyboard shortcuts.
+- **Audit (`/security`):** before/after pixel redaction, the metadata de-identification table, encrypted-storage details (size, entropy, SHA-256, header), and "Erase study" (crypto-shredding, DPDP Act Sec. 12).
+- **Ask about this scan:** a chat drawer that answers from the model's scores and heatmap for the open study.
+
+Ways to run it:
+
+- **Development (`http://localhost:5173`):** FastAPI on port `8000` plus `npm --prefix frontend run dev`; Vite proxies `/api/*` to `VITE_API_PROXY_TARGET` (default `http://127.0.0.1:8000`).
+- **Single container (`http://localhost:8000/`):** build `frontend/` and set `MEDSHIELD_SERVE_FRONTEND=true` (with `MEDSHIELD_REQUIRE_MTLS=false`).
+- **Built-in console (`http://localhost:8000/dashboard`):** a standalone HTML page served by FastAPI when `MEDSHIELD_SERVE_FRONTEND=false`.
 
 ---
 
@@ -227,7 +232,7 @@ MedShield-AI ships a **React 19 + TypeScript + Vite + Cornerstone3D** Daylight C
 
 ### Start Backend API Server (Local Development)
 ```bash
-uvicorn medshield.api.app:app --host 0.0.0.0 --port 8000 --reload
+uvicorn medshield.api.app:app --host 0.0.0.0 --port 8000 --reload --env-file .env
 ```
 > **Production Note:** Always run Uvicorn with `--workers 1` because `LocalKMSProvider` keys, `_dashboard_worklist`, and `_dashboard_session_cache` live in process memory.
 
@@ -252,14 +257,14 @@ Visit OpenAPI docs at `http://localhost:8000/docs`, the React PACS Portal at `ht
 | `POST` | `/api/v1/dashboard/shred/{study_uid}` | Executes DPDP Section 12 Crypto-Shredding via study Master KEK revocation. |
 | `POST` | `/api/chat` | Zero-PII Multimodal Scan Chat endpoint (aliased at `/api/v1/dashboard/chat`). |
 | `POST` | `/api/v1/studies` | **DICOMweb STOW-RS:** Ingests raw DICOM, runs PS 3.15 de-identification, redacts pixel PHI, encrypts via AES-256-GCM, and persists to storage (mTLS protected when `MEDSHIELD_REQUIRE_MTLS=true`). |
-| `POST` | `/api/v1/inference/{study_uid}` | Decrypts study in volatile RAM, runs thoracic multi-label disease classifier, and outputs calibrated probabilities and triage urgency. |
+| `POST` | `/api/v1/inference/{study_uid}` | Decrypts study in volatile RAM, runs thoracic multi-label disease classifier, and outputs threshold-normalized scores (0.50 = model threshold), positive/negative verdicts and triage urgency. |
 | `GET` | `/api/v1/heatmaps/{study_uid}/{pathology}` | Generates and returns a blended Grad-CAM PNG activation overlay for visual pathology localization. |
 
 ---
 
 ## 8. Deployment
 
-For full architectural guidance—covering why serverless functions are unsuitable for PyTorch + DenseNet-121 + EasyOCR, recommended **Split Deployment** (**Railway** / **Render** / **Fly.io** / **Cloud Run `min-instances=1`** backend + **Netlify** / **Vercel** / **Cloudflare Pages** frontend), **Unified Single-Container Docker** (`MEDSHIELD_SERVE_FRONTEND=true`), persistent volume mounts, and production security guards—read [**DEPLOYMENT.md**](DEPLOYMENT.md).
+For full architectural guidance—covering why serverless functions are unsuitable for PyTorch + DenseNet-121, recommended **Split Deployment** (**Railway** / **Render** / **Fly.io** / **Cloud Run `min-instances=1`** backend + **Netlify** / **Vercel** / **Cloudflare Pages** frontend), **Unified Single-Container Docker** (`MEDSHIELD_SERVE_FRONTEND=true`), persistent volume mounts, and production security guards—read [**DEPLOYMENT.md**](DEPLOYMENT.md).
 
 Pre-configured deployment files included in the repository:
 - Backend Docker & PaaS: [`Dockerfile`](Dockerfile), [`.dockerignore`](.dockerignore), [`railway.toml`](railway.toml), [`render.yaml`](render.yaml), [`requirements-prod.txt`](requirements-prod.txt), [`.env.example`](.env.example)

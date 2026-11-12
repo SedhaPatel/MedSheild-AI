@@ -1,53 +1,62 @@
-# MedShield-AI — Daylight Clinical Multi-Page Design System
+# MedShield — Interface Design System
 
 ## Intent
 
-**Who is this human?** A clinician, radiologist, hospital privacy officer, or clinical engineer working at a sunlit hospital workstation or ambulatory clinic monitor. They need calm, effortless clarity across intake, reading, and cryptographic compliance verification.
+A working tool for people triaging chest X-rays and checking how each study was de-identified and stored.
+It should look like dependable hospital software, not a product landing page: quiet, dense, legible, and
+explicit about what the model's output does and does not mean.
 
-**What must they accomplish?** Move fluidly across dedicated, uncluttered pages matching real hospital workflows:
-1. **Clinical Overview (`/`)** — Assess workstation posture, regulatory readiness (HIPAA Safe Harbor, FIPS 140-3, DPDP Act Sec. 12), pipeline architecture, and launch studies.
-2. **Worklist & Ingestion (`/worklist`)** — Drop raw `.dcm` / thoracic scans or trigger reference cases, search/filter the triage queue (`STAT_CRITICAL`, `ELEVATED`, `ROUTINE`), and route directly to reading or audit.
-3. **PACS Reading Workstation (`/workstation`)** — Inspect de-identified DICOM studies inside a bright clinical Cornerstone3D porcelain viewport with W/L, Pan, Invert, Zoom, Grad-CAM localization mix, and differential diagnostic triage.
-4. **Security & Safe Harbor Vault (`/security`)** — Verify Original vs. Burned-in Pixel Redacted scans side-by-side, inspect the full 18-tag DICOM PS 3.15 Annex E Safe Harbor diff table, check AES-256-GCM Shannon entropy (`>= 7.99 bits/byte`), copy SHA-256 hashes, inspect the 64-byte `MEDENC01` header, and execute irreversible two-step DPDP Sec. 12 Crypto-Shredding.
+## Structure
 
-**What should this feel like?** A high-precision Swiss clinical portal built for daylight monitors: crisp white institutional surfaces layered over porcelain alabaster `#F7FAFC`, fine slate hairlines `#E2E8F0`, zero dark chrome, and zero glowing text or neon halation.
+| Route | Name | Purpose |
+|-------|------|---------|
+| `/` | **Studies** | Upload / samples, priority-sorted study table with filters, detail panel for the open study |
+| `/workstation` | **Viewer** | Original / de-identified (Cornerstone3D) / heatmap views, findings, study summary, shortcuts |
+| `/security` | **Audit** | Pixel before/after, metadata de-identification table, encrypted storage, erase study, pipeline notes |
 
-## Non-Negotiable Visual Rules
-- **Strictly Light Surfaces:** All page backgrounds, navigation headers, sidebars, cards, viewports, modal overlays, tooltips, and badges use bright daylight hues (`#FFFFFF`, `#F7FAFC`, `#F1F5F9`, `#EEF3F8`). Never dark/black/charcoal chrome.
-- **No Glowing Text:** Strictly `text-shadow: none` globally; matte deep slate ink (`#1E293B`, `#475569`, `#64748B`) and matte clinical accents (`#0284C7`, `#0F766E`, `#047857`, `#B45309`, `#B91C1C`) for sharp optical clarity.
+`/worklist` redirects to `/`. Navigation is a left sidebar (top bar below `md`). Every page starts with
+`PageHeader` (title, one-line description, actions on the right).
 
-## Palette & Tokens
+## Rules
 
-| Token | Hex | Role |
-|-------|-----|------|
-| `--bg-canvas` | `#F7FAFC` | Porcelain alabaster base page canvas |
-| `--bg-panel` | `#FFFFFF` | Elevated white institutional cards, headers, side rails |
-| `--bg-elevated` | `#F1F5F9` | Cool ice mist rows, subtle tabs, pill containers |
-| `--bg-input` | `#F8FAFC` | Whisper porcelain inputs and hex wells |
-| `--bg-lightbox` | `#EEF3F8` | Bright porcelain radiograph PACS viewport stage |
-| `--bg-backdrop` | `rgba(241, 245, 249, 0.82)` | Frosted light modal overlay |
-| `--text-primary` | `#1E293B` | Crisp matte slate primary typography |
-| `--text-secondary` | `#475569` | Secondary labels and table copy |
-| `--text-muted` | `#64748B` | Tertiary hints, UIDs, timestamps (>= 4.6:1 on white) |
-| `--accent-brand` | `#0284C7` | Primary clinical cerulean CTA, active route & focus ring |
-| `--accent-teal` | `#0F766E` | Surgical teal cryptography & pipeline highlights |
-| `--accent-verified` | `#047857` | Matte botanical emerald ("Sanitized", "Passed") |
-| `--accent-attention` | `#B45309` | Matte ochre amber ("Elevated", "Warning") |
-| `--accent-critical` | `#B91C1C` | Matte triage crimson ("STAT Critical", "Shredded") |
-| `--accent-info` | `#0369A1` | Matte medical cobalt ("Info", "AI Model") |
-| `--border-subtle` | `#E2E8F0` | 1px daylight hairline |
-| `--border-strong` | `#CBD5E1` | Interactive control border |
+- **No marketing patterns.** No hero sections, eyebrow pills, "Step 01–04" strips, feature cards, sparkle/AI
+  icons, or decorative icons in headings.
+- **Color is information.** One interaction accent (blue). Red / amber / green only for clinical or security
+  status (STAT, elevated/positive, removed/ok). Everything else is neutral gray.
+- **Few badges.** Status is a dot + word (`PriorityLabel`) or colored text, not a pill. Avoid compliance-acronym
+  badges; state facts in plain sentences instead.
+- **Plain copy.** Sentence case, short labels ("Erase study", "Open in viewer"). No buzzwords ("zero-trust",
+  "evidence-first", "enclave"). Never claim compliance or certification the code does not provide.
+- **Model scores are not probabilities.** Show `Positive/Negative · 0.34` with the 0.50 threshold tick
+  (`lib/scores.ts`); never a "% chance". Mark 0.40–0.60 as borderline.
+- **Only real controls.** Every input must change something; no decorative form fields.
+
+## Tokens (`frontend/src/styles/tokens.css`)
+
+| Token | Value | Use |
+|-------|-------|-----|
+| `--bg-canvas` | `#F5F6F8` | Page background |
+| `--bg-panel` | `#FFFFFF` | Sidebar, headers, panels, tables |
+| `--bg-elevated` | `#EFF1F4` | Hover, selected nav, user chat bubble |
+| `--bg-lightbox` | `#E8EAED` | Image stage behind radiographs |
+| `--text-primary / -secondary / -muted` | `#16191D / #464E5A / #6A717C` | Text (muted ≥ 4.5:1 on white) |
+| `--accent-brand` | `#1F5FBF` | Links, primary button, focus ring, selected-row marker |
+| `--accent-critical` | `#B42318` | STAT, erase, errors |
+| `--accent-attention` | `#A15C07` | Elevated / positive (non-STAT) |
+| `--accent-verified` | `#087443` | Identifier removed / check passed |
+| `--border-subtle / -strong` | `#E2E5E9 / #C9CED6` | Hairlines / control borders |
+
+Radii: panels 6px, controls 4px, images 0–2px. Shadows only on floating layers (menus, tooltips, dialogs).
 
 ## Typography
-- **Display / Headings:** `Figtree` — clean architectural warmth suited to healthcare portals.
-- **Body UI:** `Noto Sans` — wide apertures, high legibility in multi-column tables and clinical guidance.
-- **Technical / Cryptographic Mono:** `IBM Plex Mono` (`tabular-nums`) — DICOM tag hexes, UIDs, Shannon entropy values, SHA-256 checksums, `MEDENC01` header previews.
 
-## Scan Chat Slide-Over Drawer (`ScanChatDrawer`)
-- **Trigger:** Single `"Ask AI About This Scan"` soft cerulean pill inside Card 2 (`OverviewPage`) and optional workstation bar; main 2-card dashboard grid remains unchanged.
-- **Container & Surface:** Fixed right-side `@radix-ui/react-dialog` sheet (`420px` desktop width, `100%` mobile), pure white surface (`--bg-panel`), left hairline (`1px solid --border-strong`), frosted light backdrop (`--bg-backdrop`), `text-shadow: none`.
-- **Message Hierarchy:**
-  - User bubbles: `--accent-brand-soft` (`#E0F2FE`) fill, `--accent-brand-border`, matte `--text-primary`.
-  - Assistant bubbles: `--bg-canvas` (`#F8FAFC`), `--border-subtle`, grounded finding tags (`--accent-teal` / `--accent-verified`), persistent `--accent-attention-soft` clinical scope disclaimer banner.
-  - 3 Starter Quick Chips: full-pill outlines (`--border-strong`, `--bg-panel`, hover `--bg-elevated`), visible `2px solid --border-focus` keyboard focus ring, IME composition-safe `Enter` submission.
+System UI stack (`-apple-system, Segoe UI, Roboto, …`) for text and a system monospace stack for UIDs, hashes
+and scores. No web fonts: nothing is fetched from third parties by a PHI-handling app. Body 13px, page titles
+15px semibold, secondary text 12px.
 
+## Components
+
+- `PageHeader`, `Panel`, `StudyPicker` (`components/layout/`)
+- `PriorityLabel`, `StudyDetail` (`components/study/`)
+- `TriagePanel` = findings list (no card of its own; parent provides the container)
+- Tables: white, no zebra striping, 1px row dividers, muted 12px headers.
