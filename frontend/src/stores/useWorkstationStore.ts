@@ -3,16 +3,20 @@ import { toast } from 'sonner'
 import type {
   PACSActiveTool,
   SampleCase,
+  ScanChatMessage,
+  ScanChatTurn,
   StudyAnalysisResponse,
   ViewPlaneMode,
   WorklistEntry,
 } from '@/types/clinical'
 import {
+  ApiError,
   analyzeSampleCase,
   analyzeUploadedStudy,
   fetchReferenceSamples,
   fetchWorklist,
   reanalyzeStoredStudy,
+  sendScanChatMessage,
   shredStudyKey,
 } from '@/lib/api'
 
@@ -30,6 +34,10 @@ interface WorkstationState {
   loadingMessage: string
   resetSignal: number
   zoomDeltaSignal: { seq: number; factor: number }
+  chatOpen: boolean
+  isChatSending: boolean
+  chatMessagesByStudy: Record<string, ScanChatMessage[]>
+  previewHeatmap: boolean
 
   bootstrap: () => Promise<void>
   ingestSample: (sampleId: string) => Promise<void>
@@ -37,7 +45,10 @@ interface WorkstationState {
   selectWorklistStudy: (studyUid: string) => Promise<void>
   changePathologyHeatmap: (pathology: string) => Promise<void>
   cryptoShredActiveStudy: () => Promise<void>
+  askScanQuestion: (question: string) => Promise<void>
 
+  setChatOpen: (open: boolean) => void
+  setPreviewHeatmap: (value: boolean | ((prev: boolean) => boolean)) => void
   setViewMode: (mode: ViewPlaneMode) => void
   setActiveTool: (tool: PACSActiveTool) => void
   setHeatmapOpacity: (value: number) => void
@@ -60,6 +71,10 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
   loadingMessage: '',
   resetSignal: 0,
   zoomDeltaSignal: { seq: 0, factor: 1 },
+  chatOpen: false,
+  isChatSending: false,
+  chatMessagesByStudy: {},
+  previewHeatmap: false,
 
   bootstrap: async () => {
     try {
@@ -86,6 +101,7 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
         worklist: data.worklist ?? s.worklist,
         targetPathology: data.ai_diagnostics.active_heatmap_pathology,
         isInverted: false,
+        previewHeatmap: false,
         resetSignal: s.resetSignal + 1,
       }))
       toast.success('Study ingested & sealed', {
@@ -121,6 +137,7 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
         worklist: data.worklist ?? s.worklist,
         targetPathology: data.ai_diagnostics.active_heatmap_pathology,
         isInverted: false,
+        previewHeatmap: false,
         resetSignal: s.resetSignal + 1,
       }))
       toast.success('Uploaded study sealed', {
@@ -193,7 +210,30 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
     set({ isLoading: true, loadingMessage: 'Executing DPDP Sec. 12 key destruction' })
     try {
       const res = await shredStudyKey(uid)
-      set((s) => ({ worklist: res.worklist ?? s.worklist }))
+      set((s) => {
+        const existingChat = s.chatMessagesByStudy[uid]
+        const updatedChat = existingChat
+          ? {
+              ...s.chatMessagesByStudy,
+              [uid]: [
+                ...existingChat,
+                {
+                  id: `sys-${Date.now()}`,
+                  role: 'system' as const,
+                  content:
+                    'Study cryptographic key has been destroyed under DPDP Act Sec. 12 (Right to Erasure). Plaintext image and AI chat context are permanently unrecoverable.',
+                  timestamp: Date.now(),
+                  isError: true,
+                },
+              ],
+            }
+          : s.chatMessagesByStudy
+
+        return {
+          worklist: res.worklist ?? s.worklist,
+          chatMessagesByStudy: updatedChat,
+        }
+      })
       toast.success('Cryptographic erasure verified', {
         description: `${res.revoked_kek_id.slice(-24)} overwritten; ciphertext permanently unrecoverable.`,
       })
@@ -206,6 +246,127 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
     }
   },
 
+  askScanQuestion: async (question: string) => {
+    const {
+      activeStudy,
+      targetPathology,
+      viewMode,
+      previewHeatmap,
+      chatMessagesByStudy,
+      isChatSending,
+    } = get()
+    const trimmed = question.trim()
+    if (!activeStudy || !trimmed || isChatSending) return
+
+    const scanId = activeStudy.anonymous_study_instance_uid
+    const userMessage: ScanChatMessage = {
+      id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      role: 'user',
+      content: trimmed,
+      timestamp: Date.now(),
+    }
+
+    const existingMessages = chatMessagesByStudy[scanId] ?? []
+    set((s) => ({
+      isChatSending: true,
+      chatMessagesByStudy: {
+        ...s.chatMessagesByStudy,
+        [scanId]: [...existingMessages, userMessage],
+      },
+    }))
+
+    const conversationHistory: ScanChatTurn[] = existingMessages
+      .filter((m) => m.role !== 'system' && !m.isError)
+      .map((m) => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+      }))
+      .slice(-6)
+
+    const includeHeatmap =
+      viewMode === 'heatmap' ||
+      previewHeatmap ||
+      trimmed.toLowerCase().includes('heatmap')
+    const pathology =
+      targetPathology || activeStudy.ai_diagnostics.active_heatmap_pathology
+
+    try {
+      const resp = await sendScanChatMessage({
+        scan_id: scanId,
+        user_message: trimmed,
+        target_pathology: pathology,
+        include_heatmap_overlay: includeHeatmap,
+        conversation_history: conversationHistory,
+      })
+
+      const assistantMessage: ScanChatMessage = {
+        id: `asst-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        role: 'assistant',
+        content: resp.answer,
+        provider_used: resp.provider_used,
+        grounded_findings: resp.grounded_findings,
+        timestamp: Date.now(),
+      }
+
+      set((s) => ({
+        chatMessagesByStudy: {
+          ...s.chatMessagesByStudy,
+          [scanId]: [...(s.chatMessagesByStudy[scanId] ?? []), assistantMessage],
+        },
+      }))
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 410) {
+        const systemNotice: ScanChatMessage = {
+          id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          role: 'system',
+          content:
+            'Study cryptographic key has been revoked under DPDP Act Sec. 12 (Right to Erasure). Plaintext image and AI chat context are permanently unrecoverable.',
+          timestamp: Date.now(),
+          isError: true,
+        }
+        set((s) => ({
+          chatMessagesByStudy: {
+            ...s.chatMessagesByStudy,
+            [scanId]: [...(s.chatMessagesByStudy[scanId] ?? []), systemNotice],
+          },
+        }))
+        fetchWorklist()
+          .then((worklist) => set({ worklist }))
+          .catch(() => undefined)
+        toast.error('Study key crypto-shredded', {
+          description:
+            'DPDP Sec. 12 erasure active. This study can no longer be queried.',
+        })
+      } else {
+        const errorNotice: ScanChatMessage = {
+          id: `err-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          role: 'system',
+          content:
+            err instanceof Error ? err.message : 'Chat assistant query failed',
+          timestamp: Date.now(),
+          isError: true,
+        }
+        set((s) => ({
+          chatMessagesByStudy: {
+            ...s.chatMessagesByStudy,
+            [scanId]: [...(s.chatMessagesByStudy[scanId] ?? []), errorNotice],
+          },
+        }))
+        toast.error('Scan assistant error', {
+          description: err instanceof Error ? err.message : 'Chat request failed',
+        })
+      }
+    } finally {
+      set({ isChatSending: false })
+    }
+  },
+
+  setChatOpen: (chatOpen) => set({ chatOpen }),
+  setPreviewHeatmap: (value) =>
+    set((s) => ({
+      previewHeatmap:
+        typeof value === 'function' ? value(s.previewHeatmap) : value,
+    })),
   setViewMode: (viewMode) => set({ viewMode }),
   setActiveTool: (activeTool) => set({ activeTool }),
   setHeatmapOpacity: (heatmapOpacity) => set({ heatmapOpacity }),
@@ -215,4 +376,5 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
   triggerZoomStep: (factor) =>
     set((s) => ({ zoomDeltaSignal: { seq: s.zoomDeltaSignal.seq + 1, factor } })),
 }))
+
 

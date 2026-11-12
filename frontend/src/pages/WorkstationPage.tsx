@@ -1,7 +1,18 @@
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowRight, ClipboardList, Lock, ShieldCheck } from 'lucide-react'
+import {
+  ArrowRight,
+  ClipboardList,
+  Lock,
+  MessageSquareText,
+  ShieldCheck,
+} from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import {
   Select,
   SelectContent,
@@ -21,6 +32,22 @@ export function WorkstationPage() {
   const activeStudy = useWorkstationStore((s) => s.activeStudy)
   const ingestSample = useWorkstationStore((s) => s.ingestSample)
   const selectWorklistStudy = useWorkstationStore((s) => s.selectWorklistStudy)
+  const setChatOpen = useWorkstationStore((s) => s.setChatOpen)
+
+  const isShredded = Boolean(
+    activeStudy &&
+      worklist.some(
+        (w) =>
+          w.anonymous_study_instance_uid === activeStudy.anonymous_study_instance_uid &&
+          w.is_shredded
+      )
+  )
+  const isChatDisabled = !activeStudy || isShredded
+  const chatTooltipText = !activeStudy
+    ? 'Upload or select a scan first'
+    : isShredded
+      ? 'Study erased under DPDP Sec. 12'
+      : undefined
 
   const sanitizedCount =
     activeStudy?.deidentification.tag_diff_matrix.filter((r) => r.status === 'SANITIZED').length ??
@@ -78,6 +105,29 @@ export function WorkstationPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                className="inline-flex"
+                tabIndex={isChatDisabled ? 0 : undefined}
+              >
+                <Button
+                  size="sm"
+                  variant="soft"
+                  disabled={isChatDisabled}
+                  onClick={() => setChatOpen(true)}
+                  className="gap-1.5"
+                >
+                  <MessageSquareText className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>Ask AI About This Scan</span>
+                </Button>
+              </span>
+            </TooltipTrigger>
+            {chatTooltipText && (
+              <TooltipContent>{chatTooltipText}</TooltipContent>
+            )}
+          </Tooltip>
+
           <Button size="sm" variant="outline" onClick={() => navigate('/worklist')}>
             <ClipboardList className="h-3.5 w-3.5" aria-hidden="true" />
             <span>Queue &amp; Ingest</span>

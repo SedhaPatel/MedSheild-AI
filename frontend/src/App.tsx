@@ -6,6 +6,8 @@ import { OverviewPage } from '@/pages/OverviewPage'
 import { WorklistPage } from '@/pages/WorklistPage'
 import { WorkstationPage } from '@/pages/WorkstationPage'
 import { SecurityAuditPage } from '@/pages/SecurityAuditPage'
+import { ScanChatDrawer } from '@/components/diagnostics/ScanChatDrawer'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import { useWorkstationStore } from '@/stores/useWorkstationStore'
 
 export function App() {
@@ -24,6 +26,9 @@ export function App() {
   // Global radiologist keyboard hotkeys
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
+      if (useWorkstationStore.getState().chatOpen) {
+        return
+      }
       const target = e.target as HTMLElement | null
       if (
         !useWorkstationStore.getState().activeStudy ||
@@ -45,17 +50,20 @@ export function App() {
 
   return (
     <>
-      <BrowserRouter>
-        <AppShell>
-          <Routes>
-            <Route path="/" element={<OverviewPage />} />
-            <Route path="/worklist" element={<WorklistPage />} />
-            <Route path="/workstation" element={<WorkstationPage />} />
-            <Route path="/security" element={<SecurityAuditPage />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </AppShell>
-      </BrowserRouter>
+      <TooltipProvider delayDuration={200}>
+        <BrowserRouter>
+          <AppShell>
+            <Routes>
+              <Route path="/" element={<OverviewPage />} />
+              <Route path="/worklist" element={<WorklistPage />} />
+              <Route path="/workstation" element={<WorkstationPage />} />
+              <Route path="/security" element={<SecurityAuditPage />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </AppShell>
+          <ScanChatDrawer />
+        </BrowserRouter>
+      </TooltipProvider>
 
       {/* Daylight Frosted Loading Overlay */}
       {isLoading && (

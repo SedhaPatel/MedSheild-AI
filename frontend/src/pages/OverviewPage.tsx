@@ -8,12 +8,18 @@ import {
   ClipboardList,
   Eye,
   Lock,
+  MessageSquareText,
   Monitor,
   ShieldCheck,
   Sparkles,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import {
   Select,
   SelectContent,
@@ -108,10 +114,27 @@ export function OverviewPage() {
   const targetPathology = useWorkstationStore((s) => s.targetPathology)
   const ingestSample = useWorkstationStore((s) => s.ingestSample)
   const changePathologyHeatmap = useWorkstationStore((s) => s.changePathologyHeatmap)
+  const setChatOpen = useWorkstationStore((s) => s.setChatOpen)
+  const previewHeatmap = useWorkstationStore((s) => s.previewHeatmap)
+  const setPreviewHeatmap = useWorkstationStore((s) => s.setPreviewHeatmap)
 
   const [careSetting, setCareSetting] = useState<(typeof CARE_SETTINGS)[number]>('Emergency Triage')
   const [clinicalNotes, setClinicalNotes] = useState('')
-  const [previewHeatmap, setPreviewHeatmap] = useState(false)
+
+  const isShredded = Boolean(
+    activeStudy &&
+      worklist.some(
+        (w) =>
+          w.anonymous_study_instance_uid === activeStudy.anonymous_study_instance_uid &&
+          w.is_shredded
+      )
+  )
+  const isChatDisabled = !activeStudy || isShredded
+  const chatTooltipText = !activeStudy
+    ? 'Upload or select a scan first'
+    : isShredded
+      ? 'Study erased under DPDP Sec. 12'
+      : undefined
 
   const predictions = activeStudy?.ai_diagnostics.predictions ?? []
   const topFinding = predictions[0]
@@ -293,11 +316,35 @@ export function OverviewPage() {
                     2. Diagnostic Evidence &amp; Safety Report
                   </h2>
                 </div>
-                {activeStudy && confidenceInfo ? (
-                  <Badge variant={confidenceInfo.variant}>{confidenceInfo.label}</Badge>
-                ) : (
-                  <Badge variant="neutral">Awaiting Study</Badge>
-                )}
+                <div className="flex items-center gap-2">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        className="inline-flex"
+                        tabIndex={isChatDisabled ? 0 : undefined}
+                      >
+                        <Button
+                          variant="soft"
+                          size="sm"
+                          disabled={isChatDisabled}
+                          onClick={() => setChatOpen(true)}
+                          className="gap-1.5"
+                        >
+                          <MessageSquareText className="h-3.5 w-3.5" aria-hidden="true" />
+                          <span>Ask AI About This Scan</span>
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    {chatTooltipText && (
+                      <TooltipContent>{chatTooltipText}</TooltipContent>
+                    )}
+                  </Tooltip>
+                  {activeStudy && confidenceInfo ? (
+                    <Badge variant={confidenceInfo.variant}>{confidenceInfo.label}</Badge>
+                  ) : (
+                    <Badge variant="neutral">Awaiting Study</Badge>
+                  )}
+                </div>
               </div>
 
               {!activeStudy || !topFinding ? (
@@ -386,7 +433,7 @@ export function OverviewPage() {
                         <div className="flex flex-wrap items-center gap-2 pt-1">
                           <button
                             type="button"
-                            onClick={() => setPreviewHeatmap((v) => !v)}
+                            onClick={() => setPreviewHeatmap((v: boolean) => !v)}
                             className="cursor-pointer rounded-[var(--control-radius)] border border-accent-brand-border bg-accent-brand-soft px-2.5 py-1 text-[11px] font-semibold text-accent-brand-hover transition-colors hover:bg-accent-info-soft"
                           >
                             {previewHeatmap ? 'Hide Grad-CAM Overlay' : 'Preview Grad-CAM Overlay'}

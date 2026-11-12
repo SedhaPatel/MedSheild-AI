@@ -1,9 +1,21 @@
 import type {
   SampleCase,
+  ScanChatRequest,
+  ScanChatResponse,
   ShredResponse,
   StudyAnalysisResponse,
   WorklistEntry,
 } from '@/types/clinical'
+
+export class ApiError extends Error {
+  readonly status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
 
 async function safeApiRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init)
@@ -13,12 +25,12 @@ async function safeApiRequest<T>(url: string, init?: RequestInit): Promise<T> {
   try {
     parsed = JSON.parse(raw)
   } catch {
-    throw new Error(raw.trim() || `Server returned HTTP ${res.status}`)
+    throw new ApiError(raw.trim() || `Server returned HTTP ${res.status}`, res.status)
   }
 
   if (!res.ok) {
     const errObj = parsed as { detail?: string; message?: string }
-    throw new Error(errObj.detail || errObj.message || `HTTP ${res.status} error`)
+    throw new ApiError(errObj.detail || errObj.message || `HTTP ${res.status} error`, res.status)
   }
 
   return parsed as T
@@ -83,4 +95,17 @@ export function getDicomDownloadUrl(studyUid: string, download = false): string 
   const base = `/api/v1/dashboard/studies/${encodeURIComponent(studyUid)}/dicom`
   return download ? `${base}?download=true` : base
 }
+
+export async function sendScanChatMessage(
+  request: ScanChatRequest
+): Promise<ScanChatResponse> {
+  return safeApiRequest<ScanChatResponse>('/api/chat', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  })
+}
+
 

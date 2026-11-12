@@ -99,3 +99,37 @@ export interface ShredResponse {
   worklist?: WorklistEntry[]
 }
 
+export interface ScanChatTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface ScanChatMessage {
+  id: string
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  provider_used?: string
+  grounded_findings?: string[]
+  timestamp: number
+  isError?: boolean
+}
+
+export interface ScanChatRequest {
+  scan_id: string
+  user_message: string
+  target_pathology?: string
+  include_heatmap_overlay?: boolean
+  conversation_history?: ScanChatTurn[]
+}
+
+export interface ScanChatResponse {
+  scan_id: string
+  provider_used: string
+  answer: string
+  grounded_findings: string[]
+  zero_pii_verified: boolean
+  pii_redacted_from_prompt: boolean
+  medical_disclaimer: string
+}
+
+
