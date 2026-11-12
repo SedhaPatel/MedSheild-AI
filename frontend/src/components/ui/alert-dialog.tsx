@@ -13,10 +13,10 @@ export function AlertDialogContent({
 }: ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Content>) {
   return (
     <AlertDialogPrimitive.Portal>
-      <AlertDialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/75" />
+      <AlertDialogPrimitive.Overlay className="fixed inset-0 z-50 bg-bg-backdrop backdrop-blur-xs" />
       <AlertDialogPrimitive.Content
         className={cn(
-          'fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-[var(--dialog-radius)] border border-border-strong bg-bg-panel p-5 text-text-primary focus-visible:outline-none',
+          'fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-[var(--dialog-radius)] border border-border-strong bg-bg-panel p-6 text-text-primary focus-visible:outline-none',
           className
         )}
         {...props}
@@ -30,7 +30,7 @@ export function AlertDialogHeader({ className, ...props }: HTMLAttributes<HTMLDi
 }
 
 export function AlertDialogFooter({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('mt-5 flex justify-end gap-2', className)} {...props} />
+  return <div className={cn('mt-6 flex justify-end gap-2', className)} {...props} />
 }
 
 export function AlertDialogTitle({
@@ -39,7 +39,7 @@ export function AlertDialogTitle({
 }: ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Title>) {
   return (
     <AlertDialogPrimitive.Title
-      className={cn('text-sm font-semibold text-text-primary', className)}
+      className={cn('font-display text-base font-semibold text-text-primary', className)}
       {...props}
     />
   )
@@ -56,4 +56,3 @@ export function AlertDialogDescription({
     />
   )
 }
-

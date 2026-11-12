@@ -60,7 +60,7 @@ export function CornerstoneViewport() {
         type: Enums.ViewportType.STACK,
         element: csElementRef.current,
         defaultOptions: {
-          background: [0.012, 0.016, 0.024] as Types.Point3,
+          background: [0.933, 0.953, 0.973] as Types.Point3,
         },
       })
 
@@ -196,26 +196,30 @@ export function CornerstoneViewport() {
   const showCornerstoneCanvas = Boolean(activeStudy && viewMode === 'redacted' && dicomStatus !== 'shredded' && dicomStatus !== 'fallback')
 
   return (
-    <div className="lightbox-vignette relative flex min-h-[420px] flex-1 items-center justify-center overflow-hidden bg-bg-lightbox select-none">
+    <div className="relative flex min-h-[460px] flex-1 items-center justify-center overflow-hidden bg-bg-lightbox select-none">
       {/* Empty placeholder */}
       {!activeStudy && (
-        <div className="z-10 flex max-w-xs flex-col items-center gap-2.5 px-6 text-center text-text-muted">
-          <ImageIcon className="h-8 w-8 stroke-1 opacity-60" aria-hidden="true" />
+        <div className="z-10 flex max-w-sm flex-col items-center gap-3 rounded-[var(--panel-radius)] border border-border-subtle bg-bg-panel px-6 py-5 text-center text-text-secondary">
+          <ImageIcon className="h-8 w-8 stroke-1 text-accent-brand" aria-hidden="true" />
           <p className="text-xs leading-relaxed">
-            Select a reference clinical case or drop a DICOM chest study to open the reading viewport.
+            Select a reference clinical case or drop a DICOM chest study to inspect inside the PACS workstation.
           </p>
         </div>
       )}
 
-      {/* Persistent Cornerstone3D WebGL/Stack Element */}
+      {/* Persistent Cornerstone3D WebGL/Stack Element wrapper prevents Cornerstone inline relative styles from taking flex space */}
       <div
-        ref={csElementRef}
-        data-testid="cornerstone-viewport"
         className={cn(
-          'h-full w-full',
-          showCornerstoneCanvas ? 'opacity-100' : 'pointer-events-none invisible absolute inset-0 opacity-0'
+          'absolute inset-0',
+          showCornerstoneCanvas ? 'opacity-100' : 'pointer-events-none invisible opacity-0'
         )}
-      />
+      >
+        <div
+          ref={csElementRef}
+          data-testid="cornerstone-viewport"
+          className="h-full w-full"
+        />
+      </div>
 
       {/* Destroyed study state (DPDP Sec. 12 proof) */}
       {activeStudy && isStudyShredded && viewMode === 'redacted' && (
@@ -252,7 +256,7 @@ export function CornerstoneViewport() {
                     : 'De-identified thoracic radiograph'
                 }
                 className={cn(
-                  'block max-h-[calc(100vh-340px)] max-w-full rounded-[var(--viewport-radius)] object-contain',
+                  'block max-h-[calc(100vh-280px)] max-w-full rounded-[var(--viewport-radius)] object-contain',
                   isInverted && 'invert'
                 )}
               />

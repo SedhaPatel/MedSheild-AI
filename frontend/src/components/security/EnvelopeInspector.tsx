@@ -23,14 +23,14 @@ export function EnvelopeInspector() {
   return (
     <section
       aria-label="AES-256-GCM Envelope Inspection"
-      className="overflow-hidden rounded-[var(--panel-radius)] border border-border-subtle bg-bg-canvas"
+      className="overflow-hidden rounded-[var(--panel-radius)] border border-border-subtle bg-bg-panel"
     >
-      <div className="flex items-center justify-between border-b border-border-subtle bg-bg-panel px-3.5 py-2.5">
-        <div className="flex items-center gap-1.5 text-[13px] font-semibold text-text-primary">
-          <Lock className="h-3.5 w-3.5 text-text-secondary" aria-hidden="true" />
+      <div className="flex items-center justify-between border-b border-border-subtle bg-bg-input px-4 py-3">
+        <div className="flex items-center gap-2 text-[13px] font-semibold text-text-primary">
+          <Lock className="h-4 w-4 text-accent-teal" aria-hidden="true" />
           <span>Envelope Storage</span>
         </div>
-        <Badge variant="verified">FIPS 140-3</Badge>
+        <Badge variant="teal">FIPS 140-3</Badge>
       </div>
 
       <div className="divide-y divide-border-subtle px-3.5 py-2.5">
@@ -50,7 +50,7 @@ export function EnvelopeInspector() {
             </span>
             <span className="text-[11px] text-text-muted">/ 8.00 bits/byte</span>
           </div>
-          <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-bg-elevated">
+          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-border-subtle">
             <div
               className="h-full rounded-full bg-accent-verified transition-all duration-300"
               style={{ width: `${entropyPct}%` }}

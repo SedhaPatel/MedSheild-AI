@@ -53,7 +53,7 @@ export function ViewportToolbar() {
   return (
     <TooltipProvider delayDuration={250}>
       <div
-        className="absolute inset-x-3 bottom-3 z-10 flex flex-wrap items-center justify-between gap-2 rounded-[var(--control-radius)] border border-border-subtle bg-bg-canvas/92 px-3 py-1.5 opacity-85 transition-opacity duration-150 focus-within:opacity-100 hover:opacity-100"
+        className="absolute inset-x-3 bottom-3 z-10 flex flex-wrap items-center justify-between gap-2 rounded-[var(--control-radius)] border border-border-strong bg-bg-panel/95 px-3 py-1.5 backdrop-blur-xs transition-colors duration-150"
         onMouseDown={(e) => e.stopPropagation()}
       >
         {/* Left group: Pathology Selector + Opacity Mix */}
@@ -110,7 +110,7 @@ export function ViewportToolbar() {
                 <TooltipTrigger asChild>
                   <Button
                     size="sm"
-                    variant={activeTool === 'WindowLevel' ? 'default' : 'outline'}
+                    variant={activeTool === 'WindowLevel' ? 'soft' : 'outline'}
                     onClick={() => setActiveTool('WindowLevel')}
                     aria-label="Window Level tool"
                   >
@@ -125,7 +125,7 @@ export function ViewportToolbar() {
                 <TooltipTrigger asChild>
                   <Button
                     size="icon"
-                    variant={activeTool === 'Pan' ? 'default' : 'outline'}
+                    variant={activeTool === 'Pan' ? 'soft' : 'outline'}
                     onClick={() => setActiveTool('Pan')}
                     aria-label="Pan DICOM viewport"
                   >
@@ -141,7 +141,7 @@ export function ViewportToolbar() {
             <TooltipTrigger asChild>
               <Button
                 size="sm"
-                variant={isInverted ? 'default' : 'outline'}
+                variant={isInverted ? 'soft' : 'outline'}
                 onClick={toggleInvert}
                 aria-label="Invert radiograph grayscale"
               >
@@ -198,7 +198,7 @@ export function ViewportToolbar() {
             <TooltipTrigger asChild>
               <a
                 href={getDicomDownloadUrl(activeStudy.anonymous_study_instance_uid, true)}
-                className="inline-flex h-7 items-center gap-1 rounded-[var(--control-radius)] border border-border-subtle bg-transparent px-2 text-[11px] font-medium text-text-secondary transition-colors hover:border-border-strong hover:bg-bg-elevated hover:text-text-primary focus-visible:outline-2 focus-visible:outline-border-focus"
+                className="inline-flex h-7 items-center gap-1 rounded-[var(--control-radius)] border border-accent-brand-border bg-accent-brand-soft px-2.5 text-[11px] font-medium text-accent-brand-hover transition-colors hover:bg-accent-info-soft focus-visible:outline-2 focus-visible:outline-border-focus"
                 aria-label="Download scrubbed Part 10 DICOM"
               >
                 <Download className="h-3.5 w-3.5" />

@@ -16,7 +16,7 @@ export function TooltipContent({
       <TooltipPrimitive.Content
         sideOffset={sideOffset}
         className={cn(
-          'z-50 rounded-[var(--control-radius)] border border-border-strong bg-bg-elevated px-2.5 py-1 text-[11px] font-medium text-text-primary',
+          'z-50 rounded-[var(--viewport-radius)] border border-border-strong bg-bg-panel px-2.5 py-1 text-[11px] font-medium text-text-primary',
           className
         )}
         {...props}
@@ -24,4 +24,3 @@ export function TooltipContent({
     </TooltipPrimitive.Portal>
   )
 }
-

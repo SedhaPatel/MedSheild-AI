@@ -2,23 +2,47 @@
 @import "./tokens.css";
 
 @theme inline {
-  --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-display: "Figtree", "Noto Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans: "Noto Sans", "Figtree", -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: "IBM Plex Mono", monospace;
 
   --color-bg-canvas: var(--bg-canvas);
   --color-bg-panel: var(--bg-panel);
   --color-bg-elevated: var(--bg-elevated);
   --color-bg-input: var(--bg-input);
+  --color-bg-tint: var(--bg-tint);
   --color-bg-lightbox: var(--bg-lightbox);
+  --color-bg-backdrop: var(--bg-backdrop);
 
   --color-text-primary: var(--text-primary);
   --color-text-secondary: var(--text-secondary);
   --color-text-muted: var(--text-muted);
+  --color-text-inverse: var(--text-inverse);
+
+  --color-accent-brand: var(--accent-brand);
+  --color-accent-brand-hover: var(--accent-brand-hover);
+  --color-accent-brand-soft: var(--accent-brand-soft);
+  --color-accent-brand-border: var(--accent-brand-border);
+
+  --color-accent-teal: var(--accent-teal);
+  --color-accent-teal-soft: var(--accent-teal-soft);
+  --color-accent-teal-border: var(--accent-teal-border);
 
   --color-accent-verified: var(--accent-verified);
+  --color-accent-verified-soft: var(--accent-verified-soft);
+  --color-accent-verified-border: var(--accent-verified-border);
+
   --color-accent-attention: var(--accent-attention);
+  --color-accent-attention-soft: var(--accent-attention-soft);
+  --color-accent-attention-border: var(--accent-attention-border);
+
   --color-accent-critical: var(--accent-critical);
+  --color-accent-critical-soft: var(--accent-critical-soft);
+  --color-accent-critical-border: var(--accent-critical-border);
+
   --color-accent-info: var(--accent-info);
+  --color-accent-info-soft: var(--accent-info-soft);
+  --color-accent-info-border: var(--accent-info-border);
 
   --color-border-subtle: var(--border-subtle);
   --color-border-strong: var(--border-strong);
@@ -30,7 +54,7 @@
   html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    color-scheme: dark;
+    color-scheme: light;
   }
 
   body {
@@ -42,13 +66,27 @@
     margin: 0;
   }
 
+  *,
+  *::before,
+  *::after {
+    text-shadow: none !important;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    text-shadow: none !important;
+  }
+
   ::-webkit-scrollbar {
-    width: 5px;
-    height: 5px;
+    width: 6px;
+    height: 6px;
   }
 
   ::-webkit-scrollbar-track {
-    background: transparent;
+    background: var(--bg-elevated);
   }
 
   ::-webkit-scrollbar-thumb {
@@ -66,15 +104,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.lightbox-vignette::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(circle at center, transparent 52%, rgba(0, 0, 0, 0.72) 100%);
-  pointer-events: none;
-  z-index: 4;
-}
-
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -83,4 +112,3 @@
     transition-duration: 0.01ms !important;
   }
 }
-

@@ -17,7 +17,7 @@ export function ViewerTabs() {
         : 'verified'
 
   return (
-    <div className="flex items-center justify-between border-b border-border-subtle bg-bg-panel pr-3">
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border-subtle bg-bg-panel pr-4 pl-2">
       <Tabs
         value={viewMode}
         onValueChange={(val) => setViewMode(val as ViewPlaneMode)}

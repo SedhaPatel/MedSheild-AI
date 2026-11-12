@@ -254,3 +254,19 @@ pytest --cov=medshield --cov-report=term-missing tests/
    - Invoke key revocation for the study DEK.
    - Retry inference request; verify server returns `403 Forbidden` / `CryptographicKeyRevokedException` and writes security incident log.
 
+---
+
+### Task 8: Zero-PII Multimodal Scan Chat Endpoint (`/api/chat`)
+
+> Detailed spec & task steps live in [`FRONTEND_SPEC.md`](file:///d:/ISC-Project/FRONTEND_SPEC.md) and [`docs/superpowers/plans/2026-11-12-scan-chat-implementation-plan.md`](file:///d:/ISC-Project/docs/superpowers/plans/2026-11-12-scan-chat-implementation-plan.md).
+
+**Files:**
+- Modify: `medshield/config.py`, `medshield/api/middleware/mtls_auth.py`, `medshield/api/routes/dashboard.py`
+- Create: `medshield/ml/chat_service.py`
+- Test: `tests/test_scan_chat.py`
+
+**Architectural Summary:**
+- Exposes `POST /api/chat` (plus alias `POST /api/v1/dashboard/chat`, exempted cleanly alongside `/api/v1/dashboard` in [`MTLSAuthMiddleware`](file:///d:/ISC-Project/medshield/api/middleware/mtls_auth.py#L20)).
+- Enforces **5-layer Zero-PII isolation**: never reads `_dashboard_session_cache`, decrypts solely from `EncryptedStore` via `decrypt_envelope()` (returning `HTTP 410 Gone` after DPDP crypto-shredding), re-verifies `ComplianceScanner().audit_dataset(...)` + `BurnedInAnnotation == "NO"`, strips accidental PII from free-text `user_message` via `redact_chat_pii`, and grounds replies strictly on DenseNet-121 predictions + medical disclaimers using `httpx` (supporting `gemini-2.5-flash` Multimodal or HuggingFace `google/medgemma-1.5-4b-it`, with deterministic offline fallback).
+
+

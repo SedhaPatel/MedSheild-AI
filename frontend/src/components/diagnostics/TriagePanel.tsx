@@ -10,11 +10,11 @@ export function TriagePanel() {
   return (
     <section
       aria-label="AI Diagnostic Triage"
-      className="overflow-hidden rounded-[var(--panel-radius)] border border-border-subtle bg-bg-canvas"
+      className="overflow-hidden rounded-[var(--panel-radius)] border border-border-subtle bg-bg-panel"
     >
-      <div className="flex items-center justify-between border-b border-border-subtle bg-bg-panel px-3.5 py-2.5">
-        <div className="flex items-center gap-1.5 text-[13px] font-semibold text-text-primary">
-          <Activity className="h-3.5 w-3.5 text-text-secondary" aria-hidden="true" />
+      <div className="flex items-center justify-between border-b border-border-subtle bg-bg-input px-4 py-3">
+        <div className="flex items-center gap-2 text-[13px] font-semibold text-text-primary">
+          <Activity className="h-4 w-4 text-accent-brand" aria-hidden="true" />
           <span>Diagnostic Triage</span>
         </div>
         <span className="font-mono text-[11px] text-text-muted tabular-nums">
@@ -53,27 +53,27 @@ export function TriagePanel() {
                     void changePathologyHeatmap(pred.pathology)
                   }}
                   title={`Localize ${pred.pathology} Grad-CAM saliency`}
-                  className={cn(
-                    'grid w-full cursor-pointer grid-cols-[1fr_76px_46px] items-center gap-2 rounded-[var(--control-radius)] border px-2 py-1.5 text-left transition-colors focus-visible:outline-2 focus-visible:outline-border-focus',
-                    isSelected
-                      ? 'border-border-strong bg-bg-elevated'
-                      : 'border-transparent hover:bg-bg-elevated/60'
-                  )}
-                >
-                  <div>
-                    <div className="text-xs font-medium text-text-primary">
-                      {pred.pathology}
+                    className={cn(
+                      'grid w-full cursor-pointer grid-cols-[1fr_76px_46px] items-center gap-2 rounded-[var(--control-radius)] border px-2.5 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-border-focus',
+                      isSelected
+                        ? 'border-accent-brand-border bg-accent-brand-soft'
+                        : 'border-transparent hover:bg-bg-elevated'
+                    )}
+                  >
+                    <div>
+                      <div className="text-xs font-medium text-text-primary">
+                        {pred.pathology}
+                      </div>
+                      <div className="font-mono text-[10px] text-text-muted tabular-nums">
+                        &plusmn;{pred.epistemic_uncertainty.toFixed(3)} unc.
+                      </div>
                     </div>
-                    <div className="font-mono text-[10px] text-text-muted tabular-nums">
-                      &plusmn;{pred.epistemic_uncertainty.toFixed(3)} unc.
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-border-subtle">
+                      <div
+                        className={cn('h-full rounded-full transition-all duration-300', barColor)}
+                        style={{ width: `${pct}%` }}
+                      />
                     </div>
-                  </div>
-                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-elevated">
-                    <div
-                      className={cn('h-full rounded-full transition-all duration-300', barColor)}
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
                   <div className={cn('text-right font-mono text-xs font-semibold tabular-nums', textColor)}>
                     {pct}%
                   </div>

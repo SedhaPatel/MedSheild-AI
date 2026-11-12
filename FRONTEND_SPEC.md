@@ -1,248 +1,135 @@
-# MedShield-AI: Clean Frontend Specification & Architecture
+# MedShield-AI: Clinical Portal & Zero-PII Scan Chat Specification
+
 **Document ID:** `FRONTEND_SPEC.md`  
-**Status:** Approved for Implementation (Design / Spec Phase)  
-**Methodology:** Progressive Disclosure Minimalist PACS & UI/UX Pro Max  
-**Reference Design System:** `.interface-design/system.md`  
+**Status:** Updated & Approved for Planning (Brainstormed Architecture)  
+**Frontend Stack:** React 19 + TypeScript + Vite + Cornerstone3D + Tailwind CSS v4 + Radix UI + Zustand  
+**Companion Backend:** FastAPI (`medshield/api/`)  
+**Reference Visual System:** [`.interface-design/system.md`](file:///d:/ISC-Project/.interface-design/system.md) & [`frontend/tokens.json`](file:///d:/ISC-Project/frontend/tokens.json)
 
 ---
 
-## 1. Executive Summary & Design Principles
+## 1. Visual Identity & Unchanged Portal Template
 
-The objective is to eliminate visual clutter, cognitive overload, and technical noise from the clinical interface. Medical practitioners, radiologists, and researchers need immediate clinical diagnostic clarity and cryptographic assurance without navigating dense multi-column sidebars, fake graphs, or unnecessary settings menus.
+The UI preserves the **Daylight Evidence-First Clinical Portal** aesthetic across all routes—**no dark backgrounds, no glowing text (`text-shadow: none !important`), and no neon colors**:
 
-### Core Design Rules (Strict Minimalism)
-1. **Zero Clutter:** No sidebars, no fake analytics dials, no noisy secondary widgets.
-2. **Progressive Disclosure:**
-   - **Pre-Upload (Initial State):** A serene, focused upload canvas inviting the user to drop an X-ray or click a sample patient.
-   - **Post-Upload (Active State):** Exactly **two clean cards side-by-side**:
-     - **Left Card:** High-contrast medical scan with a single toggle switch for *"Show AI Heatmap"*.
-     - **Right Card:** Immediate clinical conclusion (Top AI disease finding + confidence bar) and a compact security badge with a collapsed drawer for technical/audit details.
-3. **No Crude Dialogs:** All notifications use non-blocking, accessible floating toasts. Zero browser `alert()` popups.
-4. **Instant Actionability:** One primary button to download the decrypted scan, with an optional one-click cryptographic shredder (India DPDP Act right to erasure).
+| Role | Token (`tokens.json`) | Exact Value | Usage |
+| :--- | :--- | :--- | :--- |
+| Base Canvas | `--bg-canvas` | `#F8FAFC` | Porcelain alabaster page background & drawer messages |
+| Primary Panels | `--bg-panel` | `#FFFFFF` | Cards, navigation header, PACS rails, slide-over chat sheet |
+| Inset Inputs | `--bg-input` | `#F8FAFC` | Form inputs, drawer header/footer, table stripe alternation |
+| Alternating Band | `--bg-tint` | `#F2F8F6` | "How It Works" band on `/` |
+| Viewport Lightbox | `--bg-lightbox` | `#EEF3F8` | Cornerstone3D canvas clear color `[0.933, 0.953, 0.973]` |
+| Modal Backdrop | `--bg-backdrop` | `rgba(241, 245, 249, 0.82)` | Frosted light overlay for dialogs & slide-over chat sheet |
+| Primary / Muted Ink | `--text-primary` / `--text-muted` | `#1E293B` / `#64748B` | Matte high-contrast clinical typography (`Figtree`, `Noto Sans`, `IBM Plex Mono`) |
+| Brand & Verification | `--accent-brand` / `--accent-teal` | `#0284C7` / `#0F766E` | Cerulean primary CTAs, user bubbles, surgical teal Zero-PII badges |
+| Status Accents | `--accent-verified` / `--accent-attention` / `--accent-critical` | `#047857` / `#B45309` / `#B91C1C` | Matte Safe Harbor, moderate confidence, and STAT/shredded states |
 
 ---
 
-## 2. Backend API Endpoint & JSON Parity Matrix
+## 2. Multi-Page Clinical Portal Structure
 
-The frontend integrates directly with the existing MedShield-AI FastAPI endpoints with 100% schema alignment:
+1. **`/` — Identifier Hub (`OverviewPage.tsx`):**
+   - Centered daylight editorial hero + **uncluttered 2-card interactive workbench**:
+     - **Card 1 (`1. Radiograph Input & Clinical Context`):** `.dcm` / `.png` / `.jpg` dropzone + `Ctrl+V` clipboard paste, capture framing tip, target pathology selector, care setting context pills, optional notes, and validated reference sample triggers.
+     - **Card 2 (`2. Diagnostic Evidence & Safety Report`):** Scrubbed chest radiograph + Grad-CAM preview toggle, top pathology score + epistemic uncertainty (`±0.0xx`), visible radiographic cues, differential lookalikes, 4 alternative disease bars, Safe Harbor + entropy pills, navigation CTAs (`PACS Viewer`, `Security Vault`, `Worklist`), and the single **`"Ask AI About This Scan"`** entry button for scan chat.
+   - Alternating lower bands: **How Zero-Trust Study Identification Works** (4 numbered cards), **Thoracic Pattern Reference & Differential Lookalikes**, and **Clinical Decision-Support Scope** footer.
+2. **`/worklist` — Worklist Queue (`WorklistPage.tsx`):** Triage-prioritized session queue (`STAT_CRITICAL > ELEVATED > ROUTINE`), filter pills, search input, dropzone, and direct Inspect/Audit row actions.
+3. **`/workstation` — PACS Reading Room (`WorkstationPage.tsx`):** Full-focus Cornerstone3D WebGL viewport (`Original [1]`, `De-Identified DICOM [2]`, `Grad-CAM [3]`), W/L, Pan, Invert, Zoom, Reset, interactive Diagnostic Triage rail, plus optional secondary **`"Ask AI About This Scan"`** trigger reusing the same drawer component.
+4. **`/security` — Security & Audit Vault (`SecurityAuditPage.tsx`):** Side-by-side raw vs. pixel-redacted comparison, full 18-tag DICOM PS 3.15 Safe Harbor matrix, AES-256-GCM Shannon entropy meter (`>= 7.99 bits/byte`), SHA-256 & 64-byte `MEDENC01` hex preview, and two-step DPDP Act Sec. 12 Crypto-Shredding dialog.
 
-### 2.1 Endpoint Specification
+---
 
-| Method | Endpoint | Request Payload | Response Object | UI Consumer Component |
-| :--- | :--- | :--- | :--- | :--- |
-| `GET` | `/api/v1/dashboard/samples` | None | `{"samples": [...]}` | Quick-load clinical case chips |
-| `POST` | `/api/v1/dashboard/analyze` | `FormData`: `file` or `sample_id`, `pathology_heatmap` | `DashboardAnalysisResponse` (JSON) | Left & Right Cards |
-| `POST` | `/api/v1/dashboard/shred/{study_uid}` | URL path parameter | `{"status": "CRYPTO_SHREDDED", ...}` | Cryptographic Shred trigger |
-| `GET` | `/api/v1/dashboard/download/{study_uid}` | URL path parameter | Binary stream (`image/png` or `.dcm`) | "Download Decrypted Scan" button |
+## 3. Feature Addition: Minimal UI "Chat About This Scan"
 
-### 2.2 Complete JSON Response Schema (`/api/v1/dashboard/analyze`)
+### 3.1 UI Placement & Visual Discipline
+To preserve the clean 2-card dashboard without compressing Card 1/Card 2 heights or adding permanent chat chrome:
 
+1. **Single Trigger Button Inside Card 2 (`OverviewPage.tsx` Results Card):**
+   - Add one uncluttered button labeled **`Ask AI About This Scan`** (using existing `<Button variant="soft" size="sm">` / header utility slot or action row beside `Preview Grad-CAM Overlay` — subtle soft sky fill `#E0F2FE` with `#0284C7` border, `MessageSquareText` Lucide icon).
+   - Disabled gracefully with clear tooltip if no study is loaded or if the active `scan_id` has been crypto-shredded (`isShredded === true`).
+   - Clicking opens a **Daylight Slide-Over Drawer** (same reusable `<ScanChatDrawer />` component can also be triggered optionally from `WorkstationPage.tsx`).
+
+2. **Slide-Over Drawer (`ScanChatDrawer.tsx` — Built on `@radix-ui/react-dialog`):**
+   - **Dimensions:** Fixed right sheet (`width: 420px` on desktop `>= 640px`, `width: 100vw` max sheet on mobile), `h-full`, `bg-bg-panel` (`#FFFFFF`), left boundary `1px solid var(--border-strong)`, frosted backdrop `bg-bg-backdrop backdrop-blur-xs`, zero dark shadow or text glow.
+   - **Drawer Header (`bg-bg-input`):**
+     - Title: `Ask AI About This Scan` (`font-display text-sm font-semibold text-text-primary`)
+     - Verified privacy pill (`Badge variant="teal"`): `Zero-PII Verified` (locks confirmation that only PS 3.15 scrubbed image + classifier output leave local enclave)
+     - Compact study context pill (`font-mono text-[11px]`): top pathology + score (e.g., `Pleural Effusion • 42.1% (±0.044)`) + anonymous short UID.
+     - Accessible Close (`X`) button (`focus-visible:outline-2 focus-visible:outline-border-focus`).
+   - **Persistent Clinical Scope Banner:**
+     - Subtle matte ochre alert bar (`bg-accent-attention-soft border-accent-attention-border text-accent-attention`): *"AI explanations reflect anonymized model outputs only and do not establish a clinical diagnosis."*
+   - **Scrollable Conversation Thread (`bg-bg-panel`):**
+     - **Initial Empty State + 3 Quick-Question Chips (`rounded-full border border-border-strong bg-bg-canvas hover:bg-bg-elevated`):**
+       1. `"Explain this finding in simple terms"`
+       2. `"What did the heatmap highlight?"`
+       3. `"Next recommended clinical steps"`
+     - Clicking any chip immediately submits that prompt (`POST /api/chat`), hides/collapses the starter card smoothly or keeps chips accessible as 1-line suggestions until user replies.
+     - **Message Bubbles:**
+       - User bubble: right-aligned, max-width `85%`, `bg-accent-brand-soft border border-accent-brand-border text-text-primary`, `rounded-[var(--panel-radius)]`.
+       - Assistant bubble: left-aligned, max-width `92%`, `bg-bg-canvas border border-border-subtle text-text-primary`, renders structured paragraphs cleanly plus collapsible/compact grounded chip footer (e.g. `Grounded: DenseNet-121 • Zero-PII Checked`) and provider badge (`Gemini` / `MedGemma` / `Offline Fallback`).
+     - **Loading & Error States:**
+       - Pending state renders a non-blocking matte typing indicator inside the thread + disables duplicate send.
+       - HTTP `410 Gone` (study crypto-shredded under DPDP Sec. 12) displays a crisp crimson inline notice explaining that conversation on an erased study is blocked cleanly.
+   - **Composer Footer (`bg-bg-input border-t border-border-subtle`):**
+     - Single-row auto-growing `<textarea>` (`maxlength=1500`) + Send button (`variant="primary"`).
+     - **IME-Safe Enter Handling (`ui-ux-pro-max`):** `Enter` (without `Shift`/`Ctrl`/`Meta`) guards `if (e.isComposing || e.keyCode === 229) return` before submitting; `Shift+Enter` inserts newline.
+     - Reminder micro-caption (`10px text-text-muted`): `"Do not enter patient names, DOBs, or MRNs. Accidental identifiers are stripped before model egress."`
+
+---
+
+## 4. Backend API & Security Contract (`/api/chat`)
+
+### 4.1 Route & Middleware Parity
+- **Primary Route:** `POST /api/chat` (plus alias `POST /api/v1/dashboard/chat` reusing the identical FastAPI handler).
+- **Middleware (`medshield/api/middleware/mtls_auth.py`):** Explicitly exempt `/api/chat` alongside `/api/v1/dashboard` so local browser SPA requests do not fail mTLS header enforcement while core STOW-RS/DICOMweb routes remain protected.
+- **Vite Proxy:** `frontend/vite.config.ts` already proxies all `/api/*` requests to `http://127.0.0.1:8000`.
+
+### 4.2 Request & Response Schema
+
+**`POST /api/chat` Request (`ScanChatRequest`):**
 ```json
 {
-  "status": "SUCCESS",
-  "file_name": "patient_01_pneumonia.dcm",
-  "anonymous_study_instance_uid": "2.25.7093991301889367304617530439374403004898731214931828136692",
-  "security": {
-    "encryption_algorithm": "AES-256-GCM Envelope Encryption",
-    "container_magic_header": "MEDENC01",
-    "kms_master_key_id": "arn:medshield:kms:local:key/master-kek-v1:2.25...",
-    "storage_file_path": "storage/encrypted_studies/...",
-    "storage_file_size_bytes": 195456,
-    "sha256_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "shannon_entropy_bits_per_byte": 7.99937,
-    "entropy_target": ">= 7.99000",
-    "hex_preview_64b": "4d 45 44 45 4e 43 30 31 ...",
-    "is_tamper_resistant": true,
-    "dpdp_crypto_shredding_ready": true
-  },
-  "deidentification": {
-    "burned_in_text_redacted": false,
-    "safe_harbor_compliance": "100% COMPLIANT",
-    "uid_root": "2.25 (Private Pseudonymized Root)",
-    "tag_diff_matrix": [
-      {
-        "tag_hex": "(0010,0010)",
-        "tag_name": "PatientName",
-        "description": "Patient Full Name",
-        "original_value": "DOE^JOHN",
-        "sanitized_value": "ANON_4B12",
-        "status": "SANITIZED"
-      }
-    ]
-  },
-  "ai_diagnostics": {
-    "model_name": "DenseNet-121 (TorchXRayVision NIH / CheXpert)",
-    "is_real_weights": true,
-    "weights_source": "TorchXRayVision",
-    "inference_latency_ms": 38.5,
-    "overall_triage_urgency": "ELEVATED",
-    "active_heatmap_pathology": "Pneumonia",
-    "predictions": [
-      {
-        "pathology": "Pneumonia",
-        "probability": 0.8124,
-        "triage_urgency": "ELEVATED"
-      },
-      {
-        "pathology": "Infiltration",
-        "probability": 0.6541,
-        "triage_urgency": "ELEVATED"
-      }
-    ]
-  },
-  "images": {
-    "raw_image_url": "data:image/png;base64,...",
-    "redacted_image_url": "data:image/png;base64,...",
-    "gradcam_heatmap_url": "data:image/png;base64,..."
-  }
+  "scan_id": "2.25.7093991301889367304617530439374403004898731214931828136692",
+  "user_message": "What did the heatmap highlight?",
+  "target_pathology": "Pneumonia",
+  "include_heatmap_overlay": false,
+  "conversation_history": [
+    { "role": "user", "content": "Explain this finding in simple terms" },
+    { "role": "assistant", "content": "..." }
+  ]
+}
+```
+> Note: Client does **not** pass raw DICOM images or mutable disease probabilities as authoritative truth. When `scan_id` resolves an encrypted `.enc` envelope on disk, the backend treats the decrypted scrubbed image + fresh/verified `InferenceEngine` predictions as single source of truth.
+
+**`POST /api/chat` Response (`ScanChatResponse`):**
+```json
+{
+  "scan_id": "2.25.7093991301889367304617530439374403004898731214931828136692",
+  "provider_used": "gemini-2.5-flash",
+  "answer": "The classifier estimates Pleural Effusion at 42.1% (±0.044) with ROUTINE urgency...",
+  "grounded_findings": [
+    "Pleural Effusion: 42.1% (±0.044, ROUTINE)",
+    "Cardiomegaly: 26.4% (±0.033, ROUTINE)"
+  ],
+  "zero_pii_verified": true,
+  "pii_redacted_from_prompt": false,
+  "medical_disclaimer": "Decision-support summary only. Verify findings with a qualified radiologist and clinical history."
 }
 ```
 
----
+### 4.3 Five-Layer Zero-PII Protection Boundary
 
-## 3. Screen Layout & Progressive Disclosure Flow
+1. **Forbidden Cache Isolation:** `_dashboard_session_cache` retains `pre_pii_tags` and `raw_image_data_url` solely for the `/security` audit diff UI. `/api/chat` **MUST NEVER** read `_dashboard_session_cache`.
+2. **Envelope-Only Decryption + DPDP Sec. 12 Gate:** `/api/chat` loads `store.load(scan_id)` (`404` if unknown) and decrypts in RAM via `decrypt_envelope(enc_blob, _dashboard_kms)`. If the study Master KEK was shredded, decryption raises and returns **`HTTP 410 Gone`**, halting chat immediately.
+3. **Runtime Pre-Egress Compliance Gate (`ComplianceScanner`):** Runs `ComplianceScanner().audit_dataset(cleaned_ds)` and verifies `getattr(cleaned_ds, "BurnedInAnnotation", None) == "NO"` before rendering an RGB PNG (`max 768×768`) solely from scrubbed `PixelData`—zero DICOM metadata attributes are serialized into the VLM prompt.
+4. **Prompt Egress PII Scrubber (`redact_chat_pii`):** Scans `user_message` and `conversation_history` (capped to last `6` turns) to mask accidental typed patterns (MRNs, SSN-like IDs, DOB strings, phone numbers, email addresses) with `[REDACTED_PII]` before invoking any external model API.
+5. **Strict System Grounding Prompt:** Constrains Gemini / MedGemma to explain **only** the scrubbed radiograph and the exact JSON probability/uncertainty list computed by DenseNet-121, forbidding fabricated lab values, demographic assumptions, or autonomous diagnostic claims, and always returning `medical_disclaimer`.
 
-### 3.1 Top Navigation Bar (Fixed 56px)
-- **Left:** MedShield-AI Logomark (Clean shield icon) + App Name: `MedShield-AI` with subtle badge `Clinical Console`.
-- **Right:** Security Assurance Pill:
-  ```html
-  <div class="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium">
-    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-    <span>System Secure (AES-256 / TLS 1.3)</span>
-  </div>
-  ```
-
----
-
-### 3.2 Main Area: Progressive Disclosure Architecture
-
-```
-+---------------------------------------------------------------------------------------+
-|  MedShield-AI  [Clinical Console]                 [● System Secure (AES-256 / TLS 1.3)]|
-+---------------------------------------------------------------------------------------+
-|                                                                                       |
-|   +------------------------------------+   +------------------------------------+     |
-|   | CARD 1: MEDICAL RADIOGRAPH         |   | CARD 2: DIAGNOSIS & SECURITY       |     |
-|   |                                    |   |                                    |     |
-|   | [ State A: Drag-and-Drop Box ]     |   | 1. PRIMARY AI PREDICTION           |     |
-|   |   - Drop DICOM (.dcm) or PNG       |   |    Pneumonia (Consolidation)       |     |
-|   |   - 3 Quick Case Chips             |   |    [==================      ] 81.2%    |     |
-|   |                                    |   |    High Confidence • Urgent Triage |     |
-|   | [ State B: Loaded Medical Scan ]   |   |                                    |     |
-|   |   - High-contrast radiograph stage |   | 2. COMPACT SECURITY BADGE          |     |
-|   |   - Toggle Switch:                 |   |    [✓ PII Stripped • AES-256 Enc.] |     |
-|   |     (o) Show AI Heatmap (Grad-CAM) |   |                                    |     |
-|   |   - (Optional selector if on)      |   | 3. COLLAPSIBLE DRAWER (Default: Off|     |
-|   |                                    |   |    ▾ View Stripped DICOM Tags & Hash|    |
-|   |                                    |   |    (Clean 18 Safe Harbor Table     |     |
-|   |                                    |   |     + SHA-256 Digest Copy)         |     |
-|   |                                    |   |                                    |     |
-|   |                                    |   | 4. ACTION BUTTONS                  |     |
-|   |                                    |   |    [ ↓ Download Decrypted Scan ]   |     |
-|   |                                    |   |    [ 🗑 Crypto-Shred (DPDP Act) ]  |     |
-|   +------------------------------------+   +------------------------------------+     |
-|                                                                                       |
-+---------------------------------------------------------------------------------------+
-```
-
----
-
-## 4. Detailed Component Specifications
-
-### 4.1 Card 1 (Left): Image & Upload Stage
-
-#### Empty State (Initial Load)
-- **Container:** Rounded-xl border (`#1E2A44`), background `#0E1524`, height `560px`.
-- **Drag-Drop Target:** Clean dashed border with cloud upload icon (`lucide-cloud-upload`).
-- **Prompt:** `"Drop DICOM (.dcm) or medical scan (.png) here"` with supporting text `"Zero-Trust DICOM PS 3.15 de-identification runs instantly on upload."`
-- **Sample Quick-Buttons:** 3 quiet, elegant pill chips beneath the dropzone:
-  - `Patient 01 (Pneumonia)`
-  - `Patient 02 (Effusion)`
-  - `Patient 03 (Cardiomegaly)`
-
-#### Active State (Scan Loaded)
-- **Viewer Viewport:** Centered, aspect-ratio preserved `#000000` PACS stage with subtle 1px border.
-- **Image Switch:** Shows `images.redacted_image_url` by default. When the toggle is activated, instantly overlays `images.gradcam_heatmap_url`.
-- **Heatmap Toggle Control:**
-  - Modern iOS/Tailwind style pill switch:
-    `[ Toggle Switch ] Show AI Heatmap (Grad-CAM)`
-  - When enabled, displays a clean pill selector for the target pathology if the scan contains multiple findings.
-  - Optional subtle opacity slider ($20\%$ to $100\%$) displayed neatly inline without cluttering the screen.
-
----
-
-### 4.2 Card 2 (Right): Clinical Diagnosis & Security Summary
-
-#### Section 1: Primary AI Prediction
-- **Focal Headline:** Top pathology finding (e.g. `Pneumonia`, `Cardiomegaly`, `Pleural Effusion`) in large 20px bold white text (`font-sans font-bold text-white`).
-- **Confidence Bar:** A sleek progress track (`#162035`) with animated fill (`#06B6D4` $\rightarrow$ `#3B82F6`):
-  - Number callout: `81.2% Probability` (using `tabular-nums` in `JetBrains Mono`).
-  - Triage Chip: Compact badge showing urgency level:
-    - `ROUTINE` (Emerald chip: `#10B981`)
-    - `ELEVATED` (Amber chip: `#F59E0B`)
-    - `STAT_CRITICAL` (Rose chip: `#EF4444`)
-- **Secondary Predictions (Subtle Progressive Disclosure):**
-  - Collapsible or single-line secondary findings summary (e.g., *Other findings: Infiltration 65.4%, Effusion 18.2%*).
-
-#### Section 2: Compact Security Badge
-- Clean, compact badge displayed right below diagnosis:
-  ```html
-  <div class="flex items-center justify-between p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
-    <div class="flex items-center gap-2">
-      <i data-lucide="shield-check" class="w-4 h-4 text-emerald-400"></i>
-      <span class="text-xs font-semibold text-emerald-300">PII Stripped • AES-256-GCM Encrypted</span>
-    </div>
-    <span class="text-[11px] font-mono text-emerald-400">Entropy 7.999 / 8.0</span>
-  </div>
-  ```
-
-#### Section 3: Collapsible Drawer ("View Stripped DICOM Tags & Hash")
-- **Default State:** Collapsed (`hidden`), keeping the card compact and uncluttered.
-- **Trigger:** Accessible accordion button:
-  `[ ▾ View Stripped DICOM Tags & Hash ]`
-- **Expanded Contents:**
-  - **Ciphertext Hash:** 
-    - Full SHA-256 string in small `JetBrains Mono` with a 1-click **Copy** icon button.
-    - Sealed Container Magic: `MEDENC01 (AES-256-GCM Envelope)`.
-  - **DICOM PS 3.15 Stripped Tags Table:**
-    - Clean 4-column compact table:
-      1. Tag Hex (e.g., `(0010,0010)`)
-      2. Tag Name (e.g., `PatientName`)
-      3. Pre-Ingestion PHI (e.g., `DOE^JOHN` in soft red)
-      4. Post-Ingestion Status (`[ANON_4B12]` or `[SCRUBBED]` in emerald)
-
-#### Section 4: Action Footer
-- **Primary CTA:**
-  - `[ ↓ Download Decrypted Scan ]` (Primary emerald/cyan button).
-  - Triggers direct download of the decrypted, de-identified radiograph (.dcm / .png) for medical review.
-- **Secondary Cryptographic Shredding Button:**
-  - `[ 🗑 Crypto-Shred Study (DPDP Act) ]`
-  - Subtle text/outline button that invokes `/api/v1/dashboard/shred/{study_uid}`.
-  - Upon confirmation, updates the badge to `💥 Mathematically Shredded (Zero Key Recovery)`.
-
----
-
-## 5. Defensive Error Handling & Toast Architecture
-
-1. **No `alert()` Popups:** 
-   - All errors, network drops, or invalid file types trigger non-intrusive floating toasts in the top-right corner.
-   - Toasts auto-dismiss in 4000ms with a manual dismiss icon.
-2. **Safe API Client (`safeApiPost`):**
-   - Checks `res.ok` before decoding.
-   - Extracts server text via `await res.text()` before `JSON.parse` to eliminate `SyntaxError: Unexpected token 'I', "Internal S"...`.
-3. **File Validation:**
-   - Client verifies file extension (`.dcm`, `.png`, `.jpg`) before network upload.
-   - Files $< 32$ bytes immediately rejected with friendly guidance.
-
----
-
-## 6. Implementation Readiness Checklist
-
-- [x] Design tokens documented in `.interface-design/system.md`.
-- [x] Backend API endpoints and JSON keys fully inspected and mapped.
-- [x] 2-card minimalist layout specified with progressive disclosure.
-- [x] All clutter (sidebars, extraneous charts, settings) eliminated.
-- [x] Collapsible drawer pattern defined for DICOM audit tags.
-- [x] Download action specified for decrypted scan.
-- [ ] Next Step: User review & approval of `FRONTEND_SPEC.md` prior to code generation.
-
+### 4.4 VLM Provider Adapter (`Gemini Multimodal API` & `google/medgemma-1.5-4b-it`)
+Implemented via asynchronous `httpx.AsyncClient` (already in [`requirements.txt`](file:///d:/ISC-Project/requirements.txt)—zero heavy client SDK dependencies):
+- **Configuration (`medshield/config.py`):**
+  - `MEDSHIELD_CHAT_PROVIDER`: `"gemini"` (default when `GEMINI_API_KEY` is set) or `"medgemma"` (`google/medgemma-1.5-4b-it` via HuggingFace Router / Inference API when `HF_API_TOKEN` is set).
+  - `MEDSHIELD_GEMINI_MODEL`: `"gemini-2.5-flash"`
+  - `MEDSHIELD_MEDGEMMA_MODEL`: `"google/medgemma-1.5-4b-it"`
+  - `MEDSHIELD_CHAT_TIMEOUT_SEC`: `25.0`
+- **Offline Deterministic Grounded Fallback:** If neither `GEMINI_API_KEY` nor `HF_API_TOKEN` is configured (or upstream network fails cleanly), returns a structured `"grounded-local-fallback"` answer built directly from the DenseNet-121 probabilities, epistemic uncertainty bounds, and radiology cues + clinical disclaimer so testing and offline PACS deployments never break.

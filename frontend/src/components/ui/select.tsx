@@ -14,7 +14,7 @@ export function SelectTrigger({
   return (
     <SelectPrimitive.Trigger
       className={cn(
-        'inline-flex h-7 cursor-pointer items-center justify-between gap-2 rounded-[var(--control-radius)] border border-border-subtle bg-bg-input px-2.5 text-[11px] font-medium text-text-primary transition-colors hover:border-border-strong focus-visible:outline-2 focus-visible:outline-border-focus',
+        'inline-flex h-7 cursor-pointer items-center justify-between gap-2 rounded-[var(--control-radius)] border border-border-strong bg-bg-panel px-2.5 text-[11px] font-medium text-text-primary transition-colors hover:border-accent-brand focus-visible:outline-2 focus-visible:outline-border-focus',
         className
       )}
       {...props}
@@ -38,7 +38,7 @@ export function SelectContent({
         position="popper"
         sideOffset={4}
         className={cn(
-          'z-50 min-w-[140px] overflow-hidden rounded-[var(--panel-radius)] border border-border-strong bg-bg-elevated p-1 text-xs text-text-primary',
+          'z-50 min-w-[140px] overflow-hidden rounded-[var(--control-radius)] border border-border-strong bg-bg-panel p-1 text-xs text-text-primary',
           className
         )}
         {...props}
@@ -57,18 +57,17 @@ export function SelectItem({
   return (
     <SelectPrimitive.Item
       className={cn(
-        'relative flex cursor-pointer select-none items-center rounded-[var(--viewport-radius)] py-1.5 pl-6 pr-2.5 text-[11px] font-medium outline-none focus:bg-bg-panel data-[highlighted]:bg-bg-panel',
+        'relative flex cursor-pointer select-none items-center rounded-[var(--viewport-radius)] py-1.5 pl-6 pr-2.5 text-[11px] font-medium outline-none focus:bg-accent-brand-soft focus:text-accent-brand-hover data-[highlighted]:bg-accent-brand-soft data-[highlighted]:text-accent-brand-hover',
         className
       )}
       {...props}
     >
       <span className="absolute left-1.5 flex h-3.5 w-3.5 items-center justify-center">
         <SelectPrimitive.ItemIndicator>
-          <Check className="h-3 w-3 text-accent-verified" />
+          <Check className="h-3 w-3 text-accent-brand" />
         </SelectPrimitive.ItemIndicator>
       </span>
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
     </SelectPrimitive.Item>
   )
 }
-

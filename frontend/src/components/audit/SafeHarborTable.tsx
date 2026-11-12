@@ -9,17 +9,21 @@ import {
 } from '@/components/ui/table'
 import { useWorkstationStore } from '@/stores/useWorkstationStore'
 
-export function SafeHarborTable() {
+export function SafeHarborTable({ compact = false }: { compact?: boolean }) {
   const activeStudy = useWorkstationStore((s) => s.activeStudy)
 
   return (
     <section
       aria-label="DICOM PS 3.15 Safe Harbor Audit"
-      className="flex h-56 flex-col border-t border-border-subtle bg-bg-canvas"
+      className={
+        compact
+          ? 'flex h-56 flex-col overflow-hidden rounded-[var(--panel-radius)] border border-border-subtle bg-bg-panel'
+          : 'flex flex-col overflow-hidden rounded-[var(--panel-radius)] border border-border-subtle bg-bg-panel'
+      }
     >
-      <div className="flex items-center justify-between border-b border-border-subtle bg-bg-panel px-4 py-1.5">
-        <h2 className="text-xs font-semibold text-text-primary">
-          DICOM PS 3.15 Safe Harbor Audit
+      <div className="flex items-center justify-between border-b border-border-subtle bg-bg-input px-4 py-3">
+        <h2 className="font-display text-xs font-semibold text-text-primary">
+          DICOM PS 3.15 Safe Harbor Attribute Matrix
         </h2>
         {activeStudy ? (
           <Badge

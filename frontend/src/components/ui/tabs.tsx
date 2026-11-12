@@ -10,7 +10,7 @@ export function TabsList({
 }: ComponentPropsWithoutRef<typeof TabsPrimitive.List>) {
   return (
     <TabsPrimitive.List
-      className={cn('inline-flex items-center', className)}
+      className={cn('inline-flex items-center gap-1', className)}
       {...props}
     />
   )
@@ -23,11 +23,10 @@ export function TabsTrigger({
   return (
     <TabsPrimitive.Trigger
       className={cn(
-        'cursor-pointer border-b-2 border-transparent px-4 py-2 text-xs font-medium text-text-muted transition-colors hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-border-focus data-[state=active]:border-text-primary data-[state=active]:font-semibold data-[state=active]:text-text-primary',
+        'cursor-pointer border-b-2 border-transparent px-3.5 py-2.5 text-xs font-medium text-text-muted transition-colors hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-border-focus data-[state=active]:border-accent-brand data-[state=active]:font-semibold data-[state=active]:text-accent-brand',
         className
       )}
       {...props}
     />
   )
 }
-

@@ -26,14 +26,14 @@ export function CryptoShredDialog() {
   return (
     <section
       aria-label="DPDP Right to Erasure"
-      className="mt-auto overflow-hidden rounded-[var(--panel-radius)] border border-border-subtle bg-bg-canvas"
+      className="overflow-hidden rounded-[var(--panel-radius)] border border-border-subtle bg-bg-panel"
     >
-      <div className="flex items-center justify-between border-b border-border-subtle bg-bg-panel px-3.5 py-2.5">
-        <div className="flex items-center gap-1.5 text-[13px] font-semibold text-text-primary">
-          <Trash2 className="h-3.5 w-3.5 text-text-secondary" aria-hidden="true" />
+      <div className="flex items-center justify-between border-b border-border-subtle bg-bg-input px-4 py-3">
+        <div className="flex items-center gap-2 text-[13px] font-semibold text-text-primary">
+          <Trash2 className="h-4 w-4 text-accent-critical" aria-hidden="true" />
           <span>Right to Erasure</span>
         </div>
-        <span className="text-[11px] text-text-muted">DPDP Sec. 12</span>
+        <span className="text-[11px] font-medium text-text-muted">DPDP Sec. 12</span>
       </div>
 
       <div className="space-y-2.5 p-3.5">

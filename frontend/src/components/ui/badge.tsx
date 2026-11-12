@@ -7,11 +7,18 @@ const badgeVariants = cva(
   {
     variants: {
       variant: {
-        verified: 'border-accent-verified/25 bg-accent-verified/10 text-accent-verified',
-        attention: 'border-accent-attention/25 bg-accent-attention/10 text-accent-attention',
-        critical: 'border-accent-critical/25 bg-accent-critical/10 text-accent-critical',
-        info: 'border-accent-info/25 bg-accent-info/10 text-accent-info',
-        neutral: 'border-border-subtle bg-bg-elevated text-text-secondary',
+        verified:
+          'border-accent-verified-border bg-accent-verified-soft text-accent-verified',
+        attention:
+          'border-accent-attention-border bg-accent-attention-soft text-accent-attention',
+        critical:
+          'border-accent-critical-border bg-accent-critical-soft text-accent-critical',
+        info:
+          'border-accent-info-border bg-accent-info-soft text-accent-info',
+        teal:
+          'border-accent-teal-border bg-accent-teal-soft text-accent-teal',
+        neutral:
+          'border-border-subtle bg-bg-elevated text-text-secondary',
       },
     },
     defaultVariants: {
@@ -27,4 +34,3 @@ export interface BadgeProps
 export function Badge({ className, variant, ...props }: BadgeProps) {
   return <span className={cn(badgeVariants({ variant }), className)} {...props} />
 }
-
