@@ -26,7 +26,10 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
-import { useWorkstationStore } from '@/stores/useWorkstationStore'
+import {
+  selectIsActiveStudyShredded,
+  useWorkstationStore,
+} from '@/stores/useWorkstationStore'
 
 const QUICK_QUESTIONS = [
   'Explain this finding in simple terms',
@@ -158,22 +161,13 @@ export function ScanChatDrawer() {
   const isChatSending = useWorkstationStore((s) => s.isChatSending)
   const chatMessagesByStudy = useWorkstationStore((s) => s.chatMessagesByStudy)
   const activeStudy = useWorkstationStore((s) => s.activeStudy)
-  const worklist = useWorkstationStore((s) => s.worklist)
+  const isShredded = useWorkstationStore(selectIsActiveStudyShredded)
   const askScanQuestion = useWorkstationStore((s) => s.askScanQuestion)
 
   const [inputValue, setInputValue] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const latestMessageRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-
-  const isShredded = Boolean(
-    activeStudy &&
-      worklist.some(
-        (w) =>
-          w.anonymous_study_instance_uid === activeStudy.anonymous_study_instance_uid &&
-          w.is_shredded
-      )
-  )
 
   const scanId = activeStudy?.anonymous_study_instance_uid
   const messages = scanId ? chatMessagesByStudy[scanId] ?? [] : []
@@ -260,10 +254,11 @@ export function ScanChatDrawer() {
             </Badge>
 
             {activeStudy && topFinding ? (
-              <span className="font-mono text-[11px] text-text-secondary truncate max-w-[240px]">
+              <span className="font-mono text-[11px] text-text-secondary truncate max-w-[320px]">
                 {topFinding.pathology} &middot;{' '}
                 {(topFinding.probability * 100).toFixed(1)}% (&plusmn;
-                {topFinding.epistemic_uncertainty.toFixed(3)})
+                {topFinding.epistemic_uncertainty.toFixed(3)}) &middot; &hellip;
+                {activeStudy.anonymous_study_instance_uid.slice(-6)}
               </span>
             ) : (
               <span className="font-mono text-[11px] text-text-muted">

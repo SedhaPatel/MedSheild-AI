@@ -7,7 +7,7 @@ import httpx
 from PIL import Image
 from pydicom.dataset import Dataset
 
-from medshield.config import Settings, get_settings
+from medshield.config import Settings
 from medshield.utils.dicom_helpers import extract_pixel_array
 from medshield.utils.logging import get_audit_logger
 from medshield.verification.compliance_scanner import ComplianceScanner
@@ -280,12 +280,38 @@ class ScanChatService:
             "Content-Type": "application/json"
         }
 
-        contents = []
+        # Gemini multi-turn format:
+        # Outbound 'contents' MUST start with role 'user' and strictly alternate 'user' and 'model'.
+        # 1. Normalize scrubbed history roles and filter empty contents.
+        raw_history: List[Dict[str, str]] = []
         for turn in scrubbed_history:
             role = "user" if turn.get("role") == "user" else "model"
+            content = turn.get("content", "").strip()
+            if content:
+                raw_history.append({"role": role, "content": content})
+
+        # 2. Prune any leading assistant/model turns so contents start with 'user'.
+        while raw_history and raw_history[0]["role"] != "user":
+            raw_history.pop(0)
+
+        # 3. Merge consecutive same-role history turns safely.
+        merged_history: List[Dict[str, str]] = []
+        for turn in raw_history:
+            if merged_history and merged_history[-1]["role"] == turn["role"]:
+                merged_history[-1]["content"] = f"{merged_history[-1]['content']}\n\n{turn['content']}".strip()
+            else:
+                merged_history.append({"role": turn["role"], "content": turn["content"]})
+
+        # 4. If the last history turn is 'user', prune it so that history ends with 'model'
+        # before we append the current final 'user' turn (preserving strict role alternation).
+        while merged_history and merged_history[-1]["role"] == "user":
+            merged_history.pop()
+
+        contents: List[Dict[str, Any]] = []
+        for turn in merged_history:
             contents.append({
-                "role": role,
-                "parts": [{"text": turn.get("content", "")}]
+                "role": turn["role"],
+                "parts": [{"text": turn["content"]}]
             })
 
         user_parts: List[Dict[str, Any]] = [

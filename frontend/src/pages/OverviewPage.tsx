@@ -29,7 +29,10 @@ import {
 } from '@/components/ui/select'
 import { IngestionDropzone } from '@/components/sidebar/IngestionDropzone'
 import { cn } from '@/lib/utils'
-import { useWorkstationStore } from '@/stores/useWorkstationStore'
+import {
+  selectIsActiveStudyShredded,
+  useWorkstationStore,
+} from '@/stores/useWorkstationStore'
 
 const PATHOLOGIES = [
   'Pneumonia',
@@ -121,14 +124,7 @@ export function OverviewPage() {
   const [careSetting, setCareSetting] = useState<(typeof CARE_SETTINGS)[number]>('Emergency Triage')
   const [clinicalNotes, setClinicalNotes] = useState('')
 
-  const isShredded = Boolean(
-    activeStudy &&
-      worklist.some(
-        (w) =>
-          w.anonymous_study_instance_uid === activeStudy.anonymous_study_instance_uid &&
-          w.is_shredded
-      )
-  )
+  const isShredded = useWorkstationStore(selectIsActiveStudyShredded)
   const isChatDisabled = !activeStudy || isShredded
   const chatTooltipText = !activeStudy
     ? 'Upload or select a scan first'

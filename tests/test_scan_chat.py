@@ -3,17 +3,20 @@ import base64
 import io
 import numpy as np
 import pytest
+from fastapi.testclient import TestClient
 from PIL import Image
 from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian
 
-from medshield.config import Settings
+from medshield.api.app import create_app
+from medshield.api.routes.dashboard import _dashboard_kms, _dashboard_session_cache
+from medshield.config import Settings, get_settings
 from medshield.ml.chat_service import (
-    redact_chat_pii,
-    build_grounded_system_prompt,
     assert_zero_pii_and_extract_image,
-    ScanChatService,
+    build_grounded_system_prompt,
     compute_heatmap_zone_summary,
+    redact_chat_pii,
+    ScanChatService,
 )
 
 
@@ -387,10 +390,52 @@ def test_chat_service_upstream_http_error_falls_back_to_offline(monkeypatch):
     assert reply["zero_pii_verified"] is True
 
 
-from fastapi.testclient import TestClient
-from medshield.api.app import create_app
-from medshield.config import get_settings
-from medshield.api.routes.dashboard import _dashboard_session_cache, _dashboard_kms
+def test_chat_service_gemini_history_drops_leading_assistant_turn(monkeypatch):
+    monkeypatch.setenv("MEDSHIELD_CHAT_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "mock-gemini-test-key-123")
+
+    captured_requests = []
+    import httpx
+
+    async def mock_post(self, url, **kwargs):
+        captured_requests.append({"url": str(url), **kwargs})
+        return httpx.Response(
+            status_code=200,
+            json={"candidates": [{"content": {"parts": [{"text": "Role alternation confirmed."}]}}]},
+            request=httpx.Request("POST", str(url)),
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+
+    ds = make_compliant_dicom(burned_in="NO")
+    # Conversation history starting with an assistant turn (e.g. system welcome or odd-length slice)
+    history = [
+        {"role": "assistant", "content": "Welcome to MedShield AI scanner."},
+        {"role": "user", "content": "Can you check the right lung?"},
+        {"role": "assistant", "content": "Examining right apical field."},
+    ]
+
+    service = ScanChatService()
+    reply = asyncio.run(service.generate_reply(
+        dataset=ds,
+        user_message="Is there any consolidation in that field?",
+        predictions=[{"pathology": "Pneumonia", "probability": 0.82, "epistemic_uncertainty": 0.02, "triage_urgency": "STAT_CRITICAL"}],
+        target_pathology="Pneumonia",
+        conversation_history=history,
+    ))
+
+    assert reply["provider_used"] == "gemini-2.5-flash"
+    assert len(captured_requests) == 1
+    req_body = captured_requests[0].get("json", {})
+    contents = req_body["contents"]
+
+    # In outbound Gemini payload, contents[0] MUST be role 'user'
+    assert contents[0]["role"] == "user"
+    assert contents[0]["parts"][0]["text"] == "Can you check the right lung?"
+    assert contents[1]["role"] == "model"
+    assert contents[1]["parts"][0]["text"] == "Examining right apical field."
+    assert contents[2]["role"] == "user"
+    assert len(contents) == 3
 
 
 def test_chat_endpoint_rejects_shredded_study_with_410_and_never_leaks_phi(monkeypatch, tmp_path):

@@ -23,7 +23,10 @@ import {
 import { ViewerTabs } from '@/components/viewer/ViewerTabs'
 import { CornerstoneViewport } from '@/components/viewer/CornerstoneViewport'
 import { TriagePanel } from '@/components/diagnostics/TriagePanel'
-import { useWorkstationStore } from '@/stores/useWorkstationStore'
+import {
+  selectIsActiveStudyShredded,
+  useWorkstationStore,
+} from '@/stores/useWorkstationStore'
 
 export function WorkstationPage() {
   const navigate = useNavigate()
@@ -34,14 +37,7 @@ export function WorkstationPage() {
   const selectWorklistStudy = useWorkstationStore((s) => s.selectWorklistStudy)
   const setChatOpen = useWorkstationStore((s) => s.setChatOpen)
 
-  const isShredded = Boolean(
-    activeStudy &&
-      worklist.some(
-        (w) =>
-          w.anonymous_study_instance_uid === activeStudy.anonymous_study_instance_uid &&
-          w.is_shredded
-      )
-  )
+  const isShredded = useWorkstationStore(selectIsActiveStudyShredded)
   const isChatDisabled = !activeStudy || isShredded
   const chatTooltipText = !activeStudy
     ? 'Upload or select a scan first'

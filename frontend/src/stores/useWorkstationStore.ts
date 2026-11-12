@@ -20,7 +20,7 @@ import {
   shredStudyKey,
 } from '@/lib/api'
 
-interface WorkstationState {
+export interface WorkstationState {
   samples: SampleCase[]
   worklist: WorklistEntry[]
   activeStudy: StudyAnalysisResponse | null
@@ -56,6 +56,16 @@ interface WorkstationState {
   triggerResetViewport: () => void
   triggerZoomStep: (factor: number) => void
 }
+
+export const selectIsActiveStudyShredded = (s: WorkstationState): boolean =>
+  Boolean(
+    s.activeStudy &&
+      s.worklist.some(
+        (w) =>
+          w.anonymous_study_instance_uid ===
+            s.activeStudy?.anonymous_study_instance_uid && w.is_shredded
+      )
+  )
 
 export const useWorkstationStore = create<WorkstationState>((set, get) => ({
   samples: [],
@@ -211,27 +221,22 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
     try {
       const res = await shredStudyKey(uid)
       set((s) => {
-        const existingChat = s.chatMessagesByStudy[uid]
-        const updatedChat = existingChat
-          ? {
-              ...s.chatMessagesByStudy,
-              [uid]: [
-                ...existingChat,
-                {
-                  id: `sys-${Date.now()}`,
-                  role: 'system' as const,
-                  content:
-                    'Study cryptographic key has been destroyed under DPDP Act Sec. 12 (Right to Erasure). Plaintext image and AI chat context are permanently unrecoverable.',
-                  timestamp: Date.now(),
-                  isError: true,
-                },
-              ],
-            }
-          : s.chatMessagesByStudy
+        const existingChat = s.chatMessagesByStudy[uid] ?? []
+        const erasureNotice: ScanChatMessage = {
+          id: `sys-${Date.now()}`,
+          role: 'system',
+          content:
+            'Study cryptographic key has been destroyed under DPDP Act Sec. 12 (Right to Erasure). Plaintext image and AI chat context are permanently unrecoverable.',
+          timestamp: Date.now(),
+          isError: true,
+        }
 
         return {
           worklist: res.worklist ?? s.worklist,
-          chatMessagesByStudy: updatedChat,
+          chatMessagesByStudy: {
+            ...s.chatMessagesByStudy,
+            [uid]: [...existingChat, erasureNotice],
+          },
         }
       })
       toast.success('Cryptographic erasure verified', {
