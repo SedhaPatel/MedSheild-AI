@@ -59,6 +59,22 @@ export function resolveAbsoluteApiUrl(path: string): string {
   return resolved
 }
 
+/** Turns FastAPI error bodies (string detail, or a list of validation errors) into readable text. */
+function describeErrorBody(body: unknown): string {
+  const errObj = body as { detail?: unknown; message?: unknown } | null
+  const detail = errObj?.detail ?? errObj?.message
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail
+      .map((d: { loc?: unknown[]; msg?: string }) => {
+        const field = Array.isArray(d.loc) ? d.loc.filter((p) => p !== 'body').join('.') : ''
+        return field ? `${field}: ${d.msg ?? 'invalid'}` : (d.msg ?? 'invalid request')
+      })
+      .join('; ')
+  }
+  return ''
+}
+
 async function safeApiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(resolveApiUrl(path), init)
   const raw = await res.text()
@@ -71,8 +87,7 @@ async function safeApiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!res.ok) {
-    const errObj = parsed as { detail?: string; message?: string }
-    throw new ApiError(errObj.detail || errObj.message || `HTTP ${res.status} error`, res.status)
+    throw new ApiError(describeErrorBody(parsed) || `HTTP ${res.status} error`, res.status)
   }
 
   return parsed as T

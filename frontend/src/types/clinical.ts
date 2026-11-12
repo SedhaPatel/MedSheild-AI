@@ -14,8 +14,11 @@ export interface SampleCase {
 
 export interface PredictionItem {
   pathology: string
+  /** Threshold-normalized score (0.5 = model threshold); NOT a calibrated probability. */
   probability: number
-  epistemic_uncertainty: number
+  is_positive?: boolean
+  raw_score?: number
+  operating_threshold?: number
   triage_urgency: TriageUrgency
   gradcam_heatmap_url: string | null
   bounding_box_normalized: number[] | null
@@ -47,6 +50,8 @@ export interface SecurityMetrics {
 export interface DeidentificationSummary {
   burned_in_text_redacted: boolean
   safe_harbor_compliance: string
+  compliance_violations?: string[]
+  date_handling?: string
   uid_root: string
   tag_diff_matrix: PiiTagDiff[]
 }
@@ -57,6 +62,7 @@ export interface AIDiagnosticsSummary {
   weights_source: string
   inference_latency_ms: number
   overall_triage_urgency: TriageUrgency
+  score_semantics?: string
   active_heatmap_pathology: string
   predictions: PredictionItem[]
 }
@@ -112,6 +118,8 @@ export interface ScanChatMessage {
   grounded_findings?: string[]
   timestamp: number
   isError?: boolean
+  /** Heading for system notices, e.g. 'Study erased' or 'Request failed'. */
+  title?: string
 }
 
 export interface ScanChatRequest {

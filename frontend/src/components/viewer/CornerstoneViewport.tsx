@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Enums, RenderingEngine, type Types } from '@cornerstonejs/core'
 import { ToolGroupManager } from '@cornerstonejs/tools'
-import { AlertTriangle, ImageIcon } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import {
   WORKSTATION_RENDERING_ENGINE_ID,
   WORKSTATION_TOOL_GROUP_ID,
@@ -29,6 +29,14 @@ export function CornerstoneViewport() {
 
   const [dicomStatus, setDicomStatus] = useState<'idle' | 'loading' | 'ready' | 'shredded' | 'fallback'>('idle')
   const [rasterZoom, setRasterZoom] = useState(1)
+  // Reset raster zoom when a viewport reset is requested or the DICOM load state changes.
+  // Adjusting state during render (instead of in an effect) avoids an extra cascading render.
+  const rasterZoomResetKey = `${resetSignal}:${dicomStatus}`
+  const [prevRasterZoomResetKey, setPrevRasterZoomResetKey] = useState(rasterZoomResetKey)
+  if (prevRasterZoomResetKey !== rasterZoomResetKey) {
+    setPrevRasterZoomResetKey(rasterZoomResetKey)
+    setRasterZoom(1)
+  }
 
   const activeUid = activeStudy?.anonymous_study_instance_uid ?? null
   const isStudyShredded = Boolean(
@@ -163,7 +171,6 @@ export function CornerstoneViewport() {
 
   // Handle reset trigger
   useEffect(() => {
-    setRasterZoom(1)
     if (!engineRef.current || dicomStatus !== 'ready') return
     const viewport = engineRef.current.getViewport(WORKSTATION_VIEWPORT_ID) as Types.IStackViewport | undefined
     if (!viewport || !viewport.getCornerstoneImage()) return
@@ -200,10 +207,11 @@ export function CornerstoneViewport() {
     <div className="relative flex min-h-[460px] flex-1 items-center justify-center overflow-hidden bg-bg-lightbox select-none">
       {/* Empty placeholder */}
       {!activeStudy && (
-        <div className="z-10 flex max-w-sm flex-col items-center gap-3 rounded-[var(--panel-radius)] border border-border-subtle bg-bg-panel px-6 py-5 text-center text-text-secondary">
-          <ImageIcon className="h-8 w-8 stroke-1 text-accent-brand" aria-hidden="true" />
-          <p className="text-xs leading-relaxed">
-            Select a reference clinical case or drop a DICOM chest study to inspect inside the PACS workstation.
+        <div className="z-10 max-w-sm space-y-1 text-center text-[13px]">
+          <p className="font-medium text-text-primary">No study open</p>
+          <p className="text-text-muted">
+            Choose a study from the list above, or upload one on the{' '}
+            <Link to="/" className="text-accent-brand hover:underline">Studies</Link> page.
           </p>
         </div>
       )}
@@ -224,13 +232,10 @@ export function CornerstoneViewport() {
 
       {/* Destroyed study state (DPDP Sec. 12 proof) */}
       {activeStudy && isStudyShredded && viewMode === 'redacted' && (
-        <div className="z-10 flex max-w-sm flex-col items-center gap-2 rounded-[var(--panel-radius)] border border-accent-critical/30 bg-bg-panel px-5 py-4 text-center">
-          <AlertTriangle className="h-5 w-5 text-accent-critical" aria-hidden="true" />
-          <p className="text-xs font-semibold text-accent-critical">
-            Ciphertext Permanently Unrecoverable (HTTP 410)
-          </p>
-          <p className="text-[11px] leading-relaxed text-text-secondary">
-            Study Master KEK was destroyed under DPDP Act Sec. 12. Decryption of sanitized DICOM bytes is mathematically impossible.
+        <div className="z-10 max-w-sm space-y-1 text-center text-[13px]">
+          <p className="font-medium text-accent-critical">This study was erased</p>
+          <p className="text-text-muted">
+            Its encryption key was destroyed (DPDP Act Sec. 12), so the stored image can no longer be decrypted.
           </p>
         </div>
       )}
@@ -242,7 +247,7 @@ export function CornerstoneViewport() {
           (viewMode === 'redacted' && dicomStatus === 'fallback')) && (
           <div className="relative z-1 flex h-full w-full items-center justify-center p-4">
             <div
-              className="relative inline-flex max-h-full max-w-full items-center justify-center rounded-[var(--viewport-radius)] ring-1 ring-border-film transition-transform duration-100"
+              className="relative inline-flex max-h-full max-w-full items-center justify-center transition-transform duration-100"
               style={{ transform: `scale(${rasterZoom})` }}
             >
               <img
@@ -257,7 +262,7 @@ export function CornerstoneViewport() {
                     : 'De-identified thoracic radiograph'
                 }
                 className={cn(
-                  'block max-h-[calc(100vh-280px)] max-w-full rounded-[var(--viewport-radius)] object-contain',
+                  'block max-h-[calc(100vh-150px)] max-w-full object-contain',
                   isInverted && 'invert'
                 )}
               />
@@ -266,7 +271,7 @@ export function CornerstoneViewport() {
                 <img
                   src={activeStudy.images.gradcam_heatmap_url}
                   alt={`Grad-CAM localization for ${activeStudy.ai_diagnostics.active_heatmap_pathology}`}
-                  className="pointer-events-none absolute inset-0 h-full w-full rounded-[var(--viewport-radius)] object-fill transition-opacity duration-100"
+                  className="pointer-events-none absolute inset-0 h-full w-full object-fill transition-opacity duration-100"
                   style={{ opacity: heatmapOpacity / 100 }}
                 />
               )}
