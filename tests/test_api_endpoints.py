@@ -46,25 +46,46 @@ def create_raw_dicom_bytes(with_burned_text: bool = False) -> bytes:
     pydicom.dcmwrite(bio, ds)
     return bio.getvalue()
 
-def test_mtls_fingerprint_validation():
+def test_mtls_fingerprint_validation(tmp_path):
+    """Exercises the real MTLSAuthMiddleware through the ASGI app."""
+    from fastapi.testclient import TestClient
+    from medshield.api.app import create_app
+    from medshield.config import get_settings
+
     settings = Settings(
         require_mtls=True,
-        allowed_client_cert_fingerprints=["valid-cert-thumbprint-01"]
+        allowed_client_cert_fingerprints=["valid-cert-thumbprint-01"],
+        storage_path=str(tmp_path / "enc"),
     )
-    
-    def validate_client_cert(header_fingerprint: str | None) -> bool:
-        if not settings.require_mtls:
-            return True
-        if not header_fingerprint:
-            return False
-        return header_fingerprint in settings.allowed_client_cert_fingerprints
+    app = create_app(settings)
+    app.dependency_overrides[get_settings] = lambda: settings
+    client = TestClient(app)
+    upload = lambda headers: client.post(
+        "/api/v1/studies", headers=headers,
+        files={"file": ("s.dcm", create_raw_dicom_bytes(), "application/dicom")},
+    )
 
     # Missing cert
-    assert validate_client_cert(None) is False
+    resp = upload({})
+    assert resp.status_code == 401
+    assert "Missing X-Client-Cert-SHA256" in resp.json()["error"]
     # Invalid cert
-    assert validate_client_cert("untrusted-bad-thumbprint") is False
+    resp = upload({"X-Client-Cert-SHA256": "untrusted-bad-thumbprint"})
+    assert resp.status_code == 401
+    assert "Unauthorized" in resp.json()["error"]
     # Valid cert
-    assert validate_client_cert("valid-cert-thumbprint-01") is True
+    assert upload({"X-Client-Cert-SHA256": "valid-cert-thumbprint-01"}).status_code == 201
+    # Exempt routes stay reachable without a cert
+    assert client.get("/health").status_code == 200
+
+    # With mTLS disabled the same upload succeeds without a cert
+    settings_off = Settings(require_mtls=False, storage_path=str(tmp_path / "enc2"))
+    app_off = create_app(settings_off)
+    app_off.dependency_overrides[get_settings] = lambda: settings_off
+    resp = TestClient(app_off).post(
+        "/api/v1/studies", files={"file": ("s.dcm", create_raw_dicom_bytes(), "application/dicom")}
+    )
+    assert resp.status_code == 201
 
 def test_study_ingestion_service(tmp_path):
     storage_dir = str(tmp_path / "enc_studies")

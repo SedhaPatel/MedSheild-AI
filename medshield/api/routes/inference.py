@@ -8,12 +8,23 @@ from medshield.crypto.envelope import decrypt_envelope
 from medshield.crypto.kms_provider import KMSProvider
 from medshield.storage.encrypted_store import EncryptedStore
 from medshield.ml.inference_engine import InferenceEngine
+from medshield.ml.model import build_thoracic_model
 from medshield.utils.logging import get_audit_logger
 
 router = APIRouter(prefix="/api/v1", tags=["Inference & Diagnostics"])
 audit_logger = get_audit_logger("medshield.audit.inference")
 
-_shared_engine = InferenceEngine()
+def _build_shared_engine() -> InferenceEngine:
+    settings = get_settings()
+    model = build_thoracic_model(
+        checkpoint_path=settings.model_checkpoint_path,
+        architecture=settings.model_architecture,
+    )
+    return InferenceEngine(model=model)
+
+
+# Single model instance shared by the inference and dashboard routers
+_shared_engine = _build_shared_engine()
 
 def process_study_inference(
     study_uid: str,
@@ -88,7 +99,7 @@ def generate_study_heatmap(
     return bio.getvalue()
 
 @router.post("/inference/{study_uid}")
-async def run_inference(
+def run_inference(
     study_uid: str,
     settings: Settings = Depends(get_settings)
 ):
@@ -103,7 +114,7 @@ async def run_inference(
         raise HTTPException(status_code=500, detail="Internal server error during diagnostic inference.")
 
 @router.get("/heatmaps/{study_uid}/{pathology}")
-async def get_heatmap(
+def get_heatmap(
     study_uid: str,
     pathology: str,
     settings: Settings = Depends(get_settings)

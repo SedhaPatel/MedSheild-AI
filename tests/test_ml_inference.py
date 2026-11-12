@@ -269,3 +269,7 @@ def test_build_thoracic_model_respects_architecture_setting():
     with _pytest.raises(ValueError):
         build_thoracic_model(architecture="resnet9000")
 
+
+def test_routers_share_a_single_inference_engine():
+    from medshield.api.routes import dashboard, inference
+    assert dashboard._dashboard_engine is inference._shared_engine
