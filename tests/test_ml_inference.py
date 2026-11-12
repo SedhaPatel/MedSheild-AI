@@ -1,3 +1,4 @@
+from pathlib import Path
 import numpy as np
 import pytest
 import torch
@@ -7,7 +8,7 @@ from pydicom.uid import ExplicitVRLittleEndian
 from PIL import Image
 
 from medshield.ml.preprocessor import DICOMPreprocessor
-from medshield.ml.model import build_thoracic_model, TARGET_PATHOLOGIES
+from medshield.ml.model import build_thoracic_model, TorchXRayVisionClassifier, TARGET_PATHOLOGIES
 from medshield.ml.explainability import GradCAM
 from medshield.ml.inference_engine import InferenceEngine
 
@@ -107,4 +108,103 @@ def test_inference_engine_end_to_end():
         assert "triage_urgency" in pred
         assert pred["triage_urgency"] in ["STAT_CRITICAL", "ELEVATED", "ROUTINE"]
         assert "epistemic_uncertainty" in pred
+
+
+def create_synthetic_dicom_with_pattern(pattern: str = "blank") -> Dataset:
+    file_meta = FileMetaDataset()
+    file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    file_meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.1"
+    file_meta.MediaStorageSOPInstanceUID = f"2.25.{abs(hash(pattern)) % 100000000}"
+    
+    ds = Dataset()
+    ds.file_meta = file_meta
+    ds.Rows = 256
+    ds.Columns = 256
+    ds.BitsAllocated = 8
+    ds.BitsStored = 8
+    ds.HighBit = 7
+    ds.PixelRepresentation = 0
+    ds.SamplesPerPixel = 1
+    ds.PhotometricInterpretation = "MONOCHROME2"
+    ds.Modality = "DX"
+    ds.StudyInstanceUID = ds.file_meta.MediaStorageSOPInstanceUID
+    
+    if pattern == "blank":
+        arr = np.zeros((256, 256), dtype=np.uint8)
+    elif pattern == "lesion":
+        arr = np.full((256, 256), 40, dtype=np.uint8)
+        y, x = np.ogrid[:256, :256]
+        mask = ((x - 128) ** 2 + (y - 128) ** 2) <= 30 ** 2
+        arr[mask] = 240
+    else:
+        arr = np.random.RandomState(42).randint(0, 255, (256, 256), dtype=np.uint8)
+        
+    ds.PixelData = arr.tobytes()
+    return ds
+
+
+def test_torchxrayvision_loads_local_weights_with_op_threshs():
+    model = TorchXRayVisionClassifier()
+    assert model.is_real_weights is True
+    assert model.input_normalization == "xrv"
+    assert getattr(model.model, "op_threshs", None) is not None
+
+
+def test_xrv_preprocessor_range_and_spatial_alignment():
+    preprocessor = DICOMPreprocessor(target_size=(224, 224), normalization="xrv")
+    ds = create_synthetic_xray_dicom(inverted=False)
+    tensor, pil_img = preprocessor.process(ds)
+    
+    assert isinstance(tensor, torch.Tensor)
+    assert tensor.shape == (1, 3, 224, 224)
+    assert tensor.dtype == torch.float32
+    assert tensor.min().item() >= -1024.0 - 1e-4
+    assert tensor.max().item() <= 1024.0 + 1e-4
+    assert tensor.max().item() > tensor.min().item()
+    assert pil_img.size == (224, 224)
+
+
+def test_inference_engine_produces_distinct_predictions_across_samples():
+    engine = InferenceEngine()
+    
+    # 1. Test distinct synthetic inputs
+    ds_blank = create_synthetic_dicom_with_pattern("blank")
+    ds_lesion = create_synthetic_dicom_with_pattern("lesion")
+    
+    res_blank = engine.predict(ds_blank)
+    res_lesion = engine.predict(ds_lesion)
+    
+    probs_blank = np.array([p["probability"] for p in res_blank["predictions"]])
+    probs_lesion = np.array([p["probability"] for p in res_lesion["predictions"]])
+    
+    # Assert distinct probability vectors across different synthetic patterns
+    assert float(np.max(np.abs(probs_blank - probs_lesion))) >= 0.15
+    
+    # Verify non-zero Grad-CAM spatial spread
+    hm_lesion = engine.gradcam.generate_heatmap(engine.preprocessor.process(ds_lesion)[0], class_idx=0)
+    assert float(hm_lesion.std()) > 0.01
+
+    # 2. Test real DICOM samples if present
+    sample_files = [
+        Path("test_samples/patient_01_pneumonia.dcm"),
+        Path("test_samples/patient_02_effusion.dcm"),
+        Path("test_samples/patient_03_cardiomegaly.dcm"),
+    ]
+    existing_samples = [p for p in sample_files if p.exists()]
+    if len(existing_samples) >= 2:
+        results = [engine.predict(pydicom.dcmread(p)) for p in existing_samples]
+        prob_vecs = [np.array([p["probability"] for p in r["predictions"]]) for r in results]
+        
+        # Verify max absolute difference across distinct patient samples is >= 0.15
+        max_diff = max(
+            float(np.max(np.abs(prob_vecs[i] - prob_vecs[j])))
+            for i in range(len(prob_vecs))
+            for j in range(i + 1, len(prob_vecs))
+        )
+        assert max_diff >= 0.15, f"Expected distinct predictions across patient samples, got max diff {max_diff}"
+        
+        # Verify real sample Grad-CAM heatmap has spatial variation
+        hm_real = engine.gradcam.generate_heatmap(engine.preprocessor.process(pydicom.dcmread(existing_samples[0]))[0], class_idx=0)
+        assert float(hm_real.std()) > 0.01
+
 

@@ -17,12 +17,13 @@ class InferenceEngine:
     """
     def __init__(
         self,
-        model: Optional[ThoracicClassifier] = None,
+        model: Optional[Any] = None,
         preprocessor: Optional[DICOMPreprocessor] = None
     ):
         self.model = model or build_thoracic_model()
         self.model.eval()
-        self.preprocessor = preprocessor or DICOMPreprocessor()
+        norm = getattr(self.model, "input_normalization", "imagenet")
+        self.preprocessor = preprocessor or DICOMPreprocessor(normalization=norm)
         self.gradcam = GradCAM(self.model)
 
     def predict(self, dataset: Dataset) -> Dict[str, Any]:

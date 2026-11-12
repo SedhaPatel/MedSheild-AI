@@ -27,6 +27,7 @@ class ThoracicClassifier(nn.Module):
     """
     def __init__(self, num_classes: int = len(TARGET_PATHOLOGIES)):
         super().__init__()
+        self.input_normalization = "imagenet"
         self.backbone = models.efficientnet_v2_s(weights=None)
         in_features = self.backbone.classifier[1].in_features
         # Replace classifier head
@@ -38,10 +39,13 @@ class ThoracicClassifier(nn.Module):
         self.is_real_weights = False
         self.model_name = "EfficientNet-V2-S-Thoracic-Triage-v1"
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward_logits(self, x: torch.Tensor) -> torch.Tensor:
         if x.dim() == 4 and x.shape[1] == 1:
             x = x.repeat(1, 3, 1, 1)
-        logits = self.backbone(x)
+        return self.backbone(x)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        logits = self.forward_logits(x)
         return self.sigmoid(logits)
 
     def forward_features(self, x: torch.Tensor) -> torch.Tensor:
@@ -77,12 +81,20 @@ class TorchXRayVisionClassifier(nn.Module):
                 state_dict = torch.load(target_path, map_location="cpu", weights_only=False)
                 if hasattr(state_dict, "state_dict"):
                     state_dict = state_dict.state_dict()
-                self.model.load_state_dict(state_dict)
+                clean_state = {}
+                for k, v in state_dict.items():
+                    key = k.replace("model.", "") if k.startswith("model.") else k
+                    clean_state[key] = v
+                self.model.load_state_dict(clean_state, strict=False)
                 self.is_real_weights = True
             except Exception:
                 # Fallback to xrv internal loader with cache_dir
-                self.model = xrv.models.DenseNet(weights="densenet121-res224-all", cache_dir=cache_dir)
-                self.is_real_weights = True
+                try:
+                    self.model = xrv.models.DenseNet(weights="densenet121-res224-all", cache_dir=cache_dir)
+                    self.is_real_weights = True
+                except Exception:
+                    self.model = xrv.models.DenseNet(weights=None)
+                    self.is_real_weights = False
         else:
             try:
                 self.model = xrv.models.DenseNet(weights="densenet121-res224-all", cache_dir=cache_dir)
@@ -91,6 +103,17 @@ class TorchXRayVisionClassifier(nn.Module):
                 self.model = xrv.models.DenseNet(weights=None)
                 self.is_real_weights = False
 
+        # Restore op_threshs, input_resolution, and pathologies from TorchXRayVision metadata
+        model_meta = getattr(xrv.models, "model_urls", {}).get("densenet121-res224-all", {})
+        if "op_threshs" in model_meta and getattr(self.model, "op_threshs", None) is None:
+            self.model.op_threshs = torch.tensor(model_meta["op_threshs"], dtype=torch.float32)
+        if "input_resolution" in model_meta and not hasattr(self.model, "input_resolution"):
+            self.model.input_resolution = model_meta["input_resolution"]
+        if "labels" in model_meta:
+            self.model.targets = model_meta["labels"]
+            self.model.pathologies = self.model.targets
+
+        self.input_normalization = "xrv"
         self.model_name = "DenseNet121-TorchXRayVision-Pretrained"
         self.weights_source = "NIH-ChestX-ray14 + CheXpert + MIMIC-CXR" if self.is_real_weights else "Uninitialized"
         
@@ -106,21 +129,44 @@ class TorchXRayVisionClassifier(nn.Module):
                 
         self.sigmoid = nn.Sigmoid()
 
+    def forward_logits(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() == 4 and x.shape[1] == 3:
+            x = x.mean(dim=1, keepdim=True)
+            
+        features = self.model.features2(x)
+        all_logits = self.model.classifier(features)
+        
+        selected_logits = []
+        for idx in self.target_indices:
+            if idx >= 0:
+                selected_logits.append(all_logits[:, idx:idx+1])
+            else:
+                selected_logits.append(torch.zeros(x.shape[0], 1, device=x.device))
+        return torch.cat(selected_logits, dim=1)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # XRV expects single channel (1, 1, 224, 224)
         if x.dim() == 4 and x.shape[1] == 3:
             x = x.mean(dim=1, keepdim=True)
             
-        raw_logits = self.model(x)
-        probs = self.sigmoid(raw_logits)
+        raw_output = self.model(x)
+        # Avoid double-applying sigmoid when self.model already normalized via op_threshs or apply_sigmoid
+        has_op_threshs = getattr(self.model, "op_threshs", None) is not None
+        has_apply_sigmoid = getattr(self.model, "apply_sigmoid", False)
         
+        if has_op_threshs or has_apply_sigmoid:
+            probs = raw_output
+        else:
+            probs = self.sigmoid(raw_output)
+            
         selected_probs = []
         for idx in self.target_indices:
             if idx >= 0:
                 selected_probs.append(probs[:, idx:idx+1])
             else:
                 selected_probs.append(torch.zeros(x.shape[0], 1, device=x.device))
-        return torch.cat(selected_probs, dim=1)
+        out = torch.cat(selected_probs, dim=1)
+        return torch.clamp(out, 0.0, 1.0)
 
     def forward_features(self, x: torch.Tensor) -> torch.Tensor:
         if x.dim() == 4 and x.shape[1] == 3:

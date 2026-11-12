@@ -48,10 +48,16 @@ class GradCAM:
         """
         with self._lock:
             self.model.zero_grad()
+            self.activations = None
+            self.gradients = None
             # Enable gradients for the input and forward pass even during eval
             input_tensor = input_tensor.clone().detach().requires_grad_(True)
             
-            output = self.model(input_tensor)
+            if hasattr(self.model, "forward_logits"):
+                output = self.model.forward_logits(input_tensor)
+            else:
+                output = self.model(input_tensor)
+                
             score = output[0, class_idx]
             score.backward(retain_graph=True)
             
