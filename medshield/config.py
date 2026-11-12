@@ -42,6 +42,14 @@ class Settings(BaseModel):
         ]
     )
 
+    # Chat VLM assistant settings
+    chat_provider: str = Field(default_factory=lambda: os.getenv("MEDSHIELD_CHAT_PROVIDER", "gemini"))
+    gemini_api_key: Optional[str] = Field(default_factory=lambda: os.getenv("GEMINI_API_KEY", None))
+    gemini_model: str = Field(default_factory=lambda: os.getenv("MEDSHIELD_GEMINI_MODEL", "gemini-2.5-flash"))
+    hf_api_token: Optional[str] = Field(default_factory=lambda: os.getenv("HF_API_TOKEN", None))
+    medgemma_model: str = Field(default_factory=lambda: os.getenv("MEDSHIELD_MEDGEMMA_MODEL", "google/medgemma-1.5-4b-it"))
+    chat_timeout_sec: float = Field(default_factory=lambda: float(os.getenv("MEDSHIELD_CHAT_TIMEOUT_SEC", "25.0")))
+
     def model_post_init(self, __context) -> None:
         super().model_post_init(__context)
         # Defense-in-depth: enforce non-default salt in production
