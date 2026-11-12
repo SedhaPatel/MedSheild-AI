@@ -17,13 +17,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=8000 \
     HOME=/home/medshield \
     TORCH_HOME=/app/weights \
-    EASYOCR_MODULE_PATH=/app/weights \
     MEDSHIELD_STORAGE_PATH=/app/storage/encrypted_studies \
     MEDSHIELD_FRONTEND_DIST_DIR=/app/frontend/dist
 
 WORKDIR /app
 
-# Install OS libraries required by OpenCV, EasyOCR, and CPU PyTorch
+# Install OS libraries required by OpenCV and CPU PyTorch
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
