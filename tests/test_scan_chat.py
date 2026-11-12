@@ -386,3 +386,238 @@ def test_chat_service_upstream_http_error_falls_back_to_offline(monkeypatch):
     assert "92.0%" in reply["answer"]
     assert reply["zero_pii_verified"] is True
 
+
+from fastapi.testclient import TestClient
+from medshield.api.app import create_app
+from medshield.config import get_settings
+from medshield.api.routes.dashboard import _dashboard_session_cache, _dashboard_kms
+
+
+def test_chat_endpoint_rejects_shredded_study_with_410_and_never_leaks_phi(monkeypatch, tmp_path):
+    storage_dir = str(tmp_path / "enc_studies")
+    settings = Settings(
+        storage_path=storage_dir,
+        secret_pepper=b"test-salt-shred-1",
+        require_mtls=True,
+        chat_provider="gemini",
+        gemini_api_key="mock-gemini-key",
+    )
+    app = create_app(settings)
+    app.dependency_overrides[get_settings] = lambda: settings
+    client = TestClient(app)
+
+    # 1. Analyze patient_01_pneumonia via /api/v1/dashboard/analyze -> capture anonymous_study_instance_uid
+    analyze_resp = client.post(
+        "/api/v1/dashboard/analyze",
+        data={"sample_id": "patient_01_pneumonia", "pathology_heatmap": "Pneumonia"},
+    )
+    assert analyze_resp.status_code == 200, analyze_resp.text
+    analysis_data = analyze_resp.json()
+    uid = analysis_data["anonymous_study_instance_uid"]
+
+    # Verify pre-sanitization PII is stored in _dashboard_session_cache
+    assert uid in _dashboard_session_cache
+    cached_pre_pii = _dashboard_session_cache[uid]["pre_pii_tags"]
+    raw_name = cached_pre_pii.get("PatientName", "")
+    raw_id = cached_pre_pii.get("PatientID", "")
+    assert len(raw_name) > 0
+    assert len(raw_id) > 0
+
+    # 2. Mock httpx.AsyncClient.post to capture exact outbound text + image args
+    captured_requests = []
+    import httpx
+
+    async def mock_post(self, url, **kwargs):
+        captured_requests.append({"url": str(url), **kwargs})
+        return httpx.Response(
+            status_code=200,
+            json={
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [{"text": "Visual analysis confirms localized consolidation."}]
+                        }
+                    }
+                ]
+            },
+            request=httpx.Request("POST", str(url)),
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+
+    # 3. Call POST /api/chat with {"scan_id": uid, "user_message": "What did the heatmap highlight?", "include_heatmap_overlay": True}
+    chat_resp = client.post(
+        "/api/chat",
+        json={
+            "scan_id": uid,
+            "user_message": "What did the heatmap highlight?",
+            "include_heatmap_overlay": True,
+            "conversation_history": [
+                {"role": "user", "content": "Initial inquiry"},
+                {"role": "assistant", "content": "Prior reply"}
+            ],
+        },
+    )
+
+    # 4. Assert 200 OK, zero_pii_verified is True, captured outbound payload has NO pre-sanitization PatientName/PatientID
+    assert chat_resp.status_code == 200, chat_resp.text
+    chat_data = chat_resp.json()
+    assert chat_data["scan_id"] == uid
+    assert chat_data["zero_pii_verified"] is True
+    assert chat_data["provider_used"] == "gemini-2.5-flash"
+    assert "consolidation" in chat_data["answer"]
+    assert len(chat_data["grounded_findings"]) > 0
+    assert "diagnosis" in chat_data["medical_disclaimer"].lower()
+
+    assert len(captured_requests) == 1
+    req_body_str = str(captured_requests[0].get("json", {}))
+    assert raw_name not in req_body_str
+    assert raw_id not in req_body_str
+    # Confirm heatmap overlay was included in outbound parts
+    parts = captured_requests[0]["json"]["contents"][-1]["parts"]
+    image_parts = [p for p in parts if "inlineData" in p]
+    assert len(image_parts) == 2  # scan image + heatmap overlay
+
+    # 5. Call POST /api/v1/dashboard/shred/{uid}
+    shred_resp = client.post(f"/api/v1/dashboard/shred/{uid}")
+    assert shred_resp.status_code == 200
+    assert shred_resp.json()["status"] == "CRYPTO_SHREDDED"
+
+    # 6. Retry POST /api/chat -> assert HTTP 410 Gone
+    retry_resp = client.post(
+        "/api/chat",
+        json={
+            "scan_id": uid,
+            "user_message": "Can you still read this scan?",
+        },
+    )
+    assert retry_resp.status_code == 410
+    assert "revoked" in retry_resp.json()["detail"].lower() or "shredded" in retry_resp.json()["detail"].lower()
+
+
+def test_chat_endpoint_alias_and_404_handling(tmp_path):
+    storage_dir = str(tmp_path / "enc_studies")
+    settings = Settings(storage_path=storage_dir, secret_pepper=b"test-salt-alias-2", require_mtls=False)
+    app = create_app(settings)
+    app.dependency_overrides[get_settings] = lambda: settings
+    client = TestClient(app)
+
+    # Ingest a study
+    analyze_resp = client.post(
+        "/api/v1/dashboard/analyze",
+        data={"sample_id": "patient_01_pneumonia"},
+    )
+    assert analyze_resp.status_code == 200
+    uid = analyze_resp.json()["anonymous_study_instance_uid"]
+
+    # 1. Alias route /api/v1/dashboard/chat works identically
+    alias_resp = client.post(
+        "/api/v1/dashboard/chat",
+        json={
+            "scan_id": uid,
+            "user_message": "Describe findings",
+        },
+    )
+    assert alias_resp.status_code == 200
+    assert alias_resp.json()["scan_id"] == uid
+    assert alias_resp.json()["provider_used"] == "grounded-local-fallback"
+
+    # 2. Non-existent scan_id returns 404
+    missing_resp = client.post(
+        "/api/chat",
+        json={
+            "scan_id": "2.25.999999999999999999999",
+            "user_message": "Is anyone there?",
+        },
+    )
+    assert missing_resp.status_code == 404
+    assert "not found" in missing_resp.json()["detail"].lower()
+
+
+def test_chat_endpoint_mtls_exemption_and_core_protection(tmp_path):
+    storage_dir = str(tmp_path / "enc_studies")
+    settings = Settings(storage_path=storage_dir, secret_pepper=b"test-salt-mtls-3", require_mtls=True)
+    app = create_app(settings)
+    app.dependency_overrides[get_settings] = lambda: settings
+    client = TestClient(app)
+
+    # Ingest study (dashboard endpoint is exempted from mTLS)
+    analyze_resp = client.post(
+        "/api/v1/dashboard/analyze",
+        data={"sample_id": "patient_01_pneumonia"},
+    )
+    assert analyze_resp.status_code == 200
+    uid = analyze_resp.json()["anonymous_study_instance_uid"]
+
+    # 1. Core protected routes WITHOUT client cert fail with 401
+    core_resp = client.get("/api/v1/studies")
+    assert core_resp.status_code == 401
+    assert "Client certificate required" in core_resp.json()["error"]
+
+    # 2. POST /api/chat WITHOUT client cert succeeds (exempted)
+    chat_resp = client.post(
+        "/api/chat",
+        json={"scan_id": uid, "user_message": "Evaluate scan"},
+    )
+    assert chat_resp.status_code == 200
+    assert chat_resp.json()["scan_id"] == uid
+
+
+def test_chat_endpoint_target_pathology_and_fallback(tmp_path):
+    storage_dir = str(tmp_path / "enc_studies")
+    settings = Settings(storage_path=storage_dir, secret_pepper=b"test-salt-pathology-4", require_mtls=False)
+    app = create_app(settings)
+    app.dependency_overrides[get_settings] = lambda: settings
+    client = TestClient(app)
+
+    analyze_resp = client.post(
+        "/api/v1/dashboard/analyze",
+        data={"sample_id": "patient_01_pneumonia"},
+    )
+    assert analyze_resp.status_code == 200
+    uid = analyze_resp.json()["anonymous_study_instance_uid"]
+
+    # Explicit matched pathology
+    resp1 = client.post(
+        "/api/chat",
+        json={"scan_id": uid, "user_message": "Tell me about Cardiomegaly", "target_pathology": "Cardiomegaly"},
+    )
+    assert resp1.status_code == 200
+    assert "Cardiomegaly" in resp1.json()["answer"]
+
+    # Unknown pathology falls back to highest-probability item
+    resp2 = client.post(
+        "/api/chat",
+        json={"scan_id": uid, "user_message": "Tell me about condition X", "target_pathology": "NonExistentPathology"},
+    )
+    assert resp2.status_code == 200
+    assert resp2.json()["zero_pii_verified"] is True
+
+
+def test_chat_endpoint_zero_pii_violation_returns_422(monkeypatch, tmp_path):
+    storage_dir = str(tmp_path / "enc_studies")
+    settings = Settings(storage_path=storage_dir, secret_pepper=b"test-salt-422-5", require_mtls=False)
+    app = create_app(settings)
+    app.dependency_overrides[get_settings] = lambda: settings
+    client = TestClient(app)
+
+    analyze_resp = client.post(
+        "/api/v1/dashboard/analyze",
+        data={"sample_id": "patient_01_pneumonia"},
+    )
+    assert analyze_resp.status_code == 200
+    uid = analyze_resp.json()["anonymous_study_instance_uid"]
+
+    async def mock_generate_reply(*args, **kwargs):
+        raise ValueError("DICOM dataset violates HIPAA/Safe Harbor zero-PII compliance: PatientName retained")
+
+    monkeypatch.setattr(ScanChatService, "generate_reply", mock_generate_reply)
+
+    resp = client.post(
+        "/api/chat",
+        json={"scan_id": uid, "user_message": "Tell me about this scan"},
+    )
+    assert resp.status_code == 422
+    assert "violates HIPAA/Safe Harbor" in resp.json()["detail"]
+
+

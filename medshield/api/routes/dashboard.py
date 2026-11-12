@@ -3,11 +3,12 @@ from datetime import datetime, timezone
 import hashlib
 import io
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.responses import HTMLResponse, JSONResponse
 import numpy as np
 from PIL import Image
+from pydantic import BaseModel, Field
 import pydicom
 from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
@@ -20,6 +21,7 @@ from medshield.crypto.kms_provider import LocalKMSProvider
 from medshield.storage.encrypted_store import EncryptedStore
 from medshield.verification.entropy_analyzer import calculate_shannon_entropy
 from medshield.ml.inference_engine import InferenceEngine
+from medshield.ml.chat_service import ScanChatService
 from medshield.utils.dicom_helpers import extract_pixel_array, write_pixel_array_to_dataset
 
 router = APIRouter(tags=["Clinical Dashboard"])
@@ -479,6 +481,109 @@ def demo_crypto_shredding(study_uid: str, settings: Settings = Depends(get_setti
         "message": "Study Master KEK overwritten with zeroes. Ciphertext is now mathematically irreversible noise.",
         "worklist": _get_sorted_worklist(),
     }
+
+
+class ScanChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1, max_length=1500)
+
+
+class ScanChatRequest(BaseModel):
+    scan_id: str
+    user_message: str = Field(..., min_length=1, max_length=1500)
+    target_pathology: Optional[str] = None
+    include_heatmap_overlay: bool = False
+    conversation_history: List[ScanChatTurn] = Field(default_factory=list)
+
+
+class ScanChatResponse(BaseModel):
+    scan_id: str
+    provider_used: str
+    answer: str
+    grounded_findings: List[str]
+    zero_pii_verified: bool
+    pii_redacted_from_prompt: bool
+    medical_disclaimer: str
+
+
+@router.post("/api/chat", response_model=ScanChatResponse, tags=["Clinical Dashboard"])
+@router.post("/api/v1/dashboard/chat", response_model=ScanChatResponse, tags=["Clinical Dashboard"])
+async def scan_chat_endpoint(
+    req: ScanChatRequest,
+    settings: Settings = Depends(get_settings),
+):
+    """
+    Multimodal Zero-PII Clinical Scan Assistant:
+    1. Loads encrypted study from EncryptedStore.
+    2. Decrypts via KMS AES-256-GCM envelope; if KEK was shredded, returns HTTP 410.
+    3. Infers predictions via DenseNet-121 engine.
+    4. Evaluates optional Grad-CAM heatmap overlay.
+    5. Dispatches zero-PII grounded chat via ScanChatService.
+    CRITICAL: Never accesses _dashboard_session_cache.
+    """
+    store = _dashboard_store.get(settings.storage_path) or EncryptedStore(storage_dir=settings.storage_path)
+    if not store.exists(req.scan_id):
+        raise HTTPException(status_code=404, detail=f"Scan '{req.scan_id}' not found in encrypted storage")
+
+    enc_blob = store.load(req.scan_id)
+    try:
+        decrypted_bytes = decrypt_envelope(enc_blob, _dashboard_kms)
+    except Exception as e:
+        raise HTTPException(
+            status_code=410,
+            detail=f"Study cryptographic key has been revoked (DPDP Sec. 12 Crypto-Shredded): {str(e)}"
+        )
+
+    cleaned_ds = pydicom.dcmread(io.BytesIO(decrypted_bytes), force=True)
+
+    # In-memory inference using _dashboard_engine
+    pred_result = _dashboard_engine.predict(cleaned_ds)
+    predictions_list = pred_result.get("predictions", [])
+
+    # Resolve target_pathology by matching req.target_pathology against
+    # [p["pathology"] for p in pred_result["predictions"]], defaulting to highest-probability item if absent/unmatched
+    valid_pathologies = [p.get("pathology") for p in predictions_list if "pathology" in p]
+    target_pathology = req.target_pathology
+    if not target_pathology or target_pathology not in valid_pathologies:
+        if predictions_list:
+            highest_pred = max(predictions_list, key=lambda x: float(x.get("probability", 0.0)))
+            target_pathology = highest_pred.get("pathology", "Pneumonia")
+        else:
+            target_pathology = "Pneumonia"
+
+    # Heatmap generation if requested
+    heatmap_pil = None
+    if req.include_heatmap_overlay:
+        try:
+            heatmap_pil = _dashboard_engine.generate_heatmap_image(cleaned_ds, target_pathology)
+        except Exception:
+            heatmap_pil = None
+
+    history_dicts = [{"role": t.role, "content": t.content} for t in req.conversation_history]
+
+    chat_service = ScanChatService(settings=settings)
+    try:
+        reply = await chat_service.generate_reply(
+            dataset=cleaned_ds,
+            user_message=req.user_message,
+            predictions=predictions_list,
+            target_pathology=target_pathology,
+            conversation_history=history_dicts,
+            heatmap_pil=heatmap_pil,
+            settings=settings,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    return ScanChatResponse(
+        scan_id=req.scan_id,
+        provider_used=reply["provider_used"],
+        answer=reply["answer"],
+        grounded_findings=reply["grounded_findings"],
+        zero_pii_verified=reply["zero_pii_verified"],
+        pii_redacted_from_prompt=reply["pii_redacted_from_prompt"],
+        medical_disclaimer=reply["medical_disclaimer"],
+    )
 
 
 @router.get("/dashboard", response_class=HTMLResponse, tags=["Clinical Dashboard"])

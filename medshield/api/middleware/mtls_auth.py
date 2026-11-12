@@ -16,8 +16,8 @@ class MTLSAuthMiddleware(BaseHTTPMiddleware):
         self.settings = settings or get_settings()
 
     async def dispatch(self, request: Request, call_next):
-        # Exclude OpenAPI documentation, health checks, and clinical dashboard
-        if request.url.path in ("/docs", "/openapi.json", "/health", "/", "/dashboard") or request.url.path.startswith("/api/v1/dashboard"):
+        # Exclude OpenAPI documentation, health checks, clinical dashboard, and scan chat assistant
+        if request.url.path in ("/docs", "/openapi.json", "/health", "/", "/dashboard", "/api/chat") or request.url.path.startswith("/api/v1/dashboard"):
             return await call_next(request)
 
         if self.settings.require_mtls:
