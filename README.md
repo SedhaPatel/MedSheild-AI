@@ -2,6 +2,8 @@
 
 **Secure, HIPAA & India DPDP-Compliant AI Medical Image Disease Detection System**
 
+> **Production & Cloud Hosting:** See [**DEPLOYMENT.md**](DEPLOYMENT.md) for the complete architecture guide (recommended split Docker PaaS + CDN SPA deployment, unified single-container Docker mode, memory/storage requirements, and environment reference).
+
 ---
 
 ## 1. Executive Overview & Problem Statement
@@ -110,9 +112,9 @@ MedShield-AI serializes encrypted studies into an authenticated binary envelope:
 
 ---
 
-## 4. Deep Learning Diagnostic Engine & Explainability
+## 4. Deep Learning Diagnostic Engine, Explainability & Scan Chat
 
-- **Architectures Supported:** **EfficientNet-V2-S** (progressive training resolution, fast Fused-MBConv layers) and **ConvNeXt-V2-Base** (modernized $7\times7$ depthwise convolutions with Global Response Normalization).
+- **Primary & Fallback Backbones:** **TorchXRayVision DenseNet-121** (`densenet121-res224-all`, cached in `weights/`), with **EfficientNet-V2-S** (`ThoracicClassifier`) fallback.
 - **Target Pathologies:**
   1. *Pneumonia* (consolidation / inflammatory infiltrates)
   2. *Cardiomegaly* (cardiothoracic ratio $> 0.50$)
@@ -120,18 +122,19 @@ MedShield-AI serializes encrypted studies into an authenticated binary envelope:
   4. *Pneumothorax* (visceral pleural line visualization — *STAT Critical*)
   5. *Atelectasis* (volume loss / linear opacity)
 - **Triage Urgency Grading:**
-  - `STAT_CRITICAL`: Pneumothorax detected ($p \ge 0.50$). Flagged for immediate emergency radiologist notification.
-  - `ELEVATED`: Pneumonia, Pleural Effusion, or Cardiomegaly detected ($p \ge 0.50$).
+  - `STAT_CRITICAL`: Pneumothorax or Pneumonia detected with high confidence ($p \ge 0.70$). Flagged for immediate emergency radiologist notification.
+  - `ELEVATED`: Any target pathology detected at $p \ge 0.50$.
   - `ROUTINE`: All pathology probabilities $< 0.50$.
-- **Explainability (Grad-CAM):** Thread-safe Class Activation Mapping calculating gradients of the target class score with respect to feature maps of the final convolutional layer, mapped through a JET/Inferno color palette and blended ($\alpha=0.45$) with the normalized DICOM radiograph.
+- **Explainability (Grad-CAM):** Thread-safe Class Activation Mapping calculating gradients of the target class score with respect to the final convolutional layer, mapped to an RGB heatmap overlay blended ($\alpha=0.45$) with the normalized radiograph.
+- **Zero-PII Clinical Scan Chat (`medshield/ml/chat_service.py`):** Re-verifies HIPAA Safe Harbor compliance (`BurnedInAnnotation == "NO"`), strips accidental PII from clinician prompts/history, extracts sanitized PNG pixel frames (`<= 768x768`), and dispatches to **Gemini 2.5 Flash**, **MedGemma** (`google/medgemma-1.5-4b-it` via Hugging Face Router), or the deterministic `grounded-local-fallback` synthesizer when API keys are unset.
 
 ---
 
-## 5. Installation & Setup Guide
+## 5. Installation & Local Setup Guide
 
 ### Prerequisites
-- Python 3.11, 3.12, 3.13, or 3.14
-- Operating System: Linux, macOS, or Windows
+- Python 3.10+ (Docker targets Python 3.11; tested on Windows/Linux/macOS)
+- Node.js 20+ / npm (for the React + Cornerstone3D frontend in `frontend/`)
 - PyTorch 2.0+ (CPU or CUDA-enabled GPU)
 
 ### 1. Clone & Create Virtual Environment
@@ -146,92 +149,140 @@ python -m venv .venv
 source .venv/bin/activate
 ```
 
-### 2. Install Dependencies
+### 2. Install Backend & Frontend Dependencies
 ```bash
+# Backend + dev/test dependencies
 pip install -r requirements.txt
+pip install -e .
+
+# React + Cornerstone3D frontend dependencies
+npm --prefix frontend install
 ```
 
 ### 3. Environment Configuration
-MedShield-AI supports environment variables or a `.env` file:
+Copy the documented environment templates and fill in secrets locally (`.env` and `.env.*` are gitignored):
+
+```bash
+cp .env.example .env
+cp frontend/.env.example frontend/.env.local
+```
+
+Key backend variables (see [`.env.example`](.env.example) for all options):
 
 ```ini
-# Core Configuration
-MEDSHIELD_ENVIRONMENT=production
+# Core & Storage
+MEDSHIELD_ENVIRONMENT=development
 MEDSHIELD_DEBUG=false
 MEDSHIELD_STORAGE_PATH=./storage/encrypted_studies
 
-# Cryptographic Salt (Must be >= 32 characters in production)
-MEDSHIELD_SECRET_PEPPER=ProductionMasterPepper_2026_StrictSecuritySaltValue_99!
+# Cryptographic Salt (MUST be a unique >=32-char secret when MEDSHIELD_ENVIRONMENT=production)
+MEDSHIELD_SECRET_PEPPER=replace-with-unique-random-secret-at-least-32-chars
 MEDSHIELD_KMS_MASTER_KEY_ID=arn:medshield:kms:local:key/master-kek-v1
 
-# Security & Mutual TLS
-MEDSHIELD_REQUIRE_MTLS=true
+# Security, mTLS & CORS
+MEDSHIELD_REQUIRE_MTLS=false
 MEDSHIELD_TLS_MIN_VERSION=TLSv1.3
+MEDSHIELD_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000
 
-# Deep Learning Backbone
-MEDSHIELD_MODEL_ARCHITECTURE=efficientnet_v2_s
+# Optional Unified SPA Hosting (serve built frontend/dist from FastAPI)
+MEDSHIELD_SERVE_FRONTEND=false
+MEDSHIELD_FRONTEND_DIST_DIR=./frontend/dist
+
+# Zero-PII Scan Chat VLM Options ("gemini" | "medgemma"; blank keys use grounded-local-fallback)
+MEDSHIELD_CHAT_PROVIDER=gemini
+GEMINI_API_KEY=
+MEDSHIELD_GEMINI_MODEL=gemini-2.5-flash
+HF_API_TOKEN=
+MEDSHIELD_MEDGEMMA_MODEL=google/medgemma-1.5-4b-it
+MEDSHIELD_CHAT_TIMEOUT_SEC=25.0
+```
+
+Frontend Vite variables (see [`frontend/.env.example`](frontend/.env.example)):
+
+```ini
+# Leave empty for local Vite proxy & unified single-container deployments;
+# set to public FastAPI origin (e.g. https://medshield-api.up.railway.app) for split CDN hosting
+VITE_API_BASE_URL=
+VITE_API_PROXY_TARGET=http://127.0.0.1:8000
 ```
 
 ---
 
-## 6. Clinical Diagnostic & Security Dashboard
+## 6. Clinical Portal & Security Workstation
 
-MedShield-AI features an interactive, high-precision dark workstation UI designed for radiologists and compliance officers:
+MedShield-AI ships a **React 19 + TypeScript + Vite + Cornerstone3D** Daylight Clinical Portal (`frontend/`) alongside FastAPI's built-in `/dashboard` console:
 
-- **Launch Dashboard:** Start the API gateway and visit `http://localhost:8000/dashboard` (or root `http://localhost:8000/`).
-- **Features Included:**
-  - **Drag-and-Drop Ingestion:** Supports `.dcm` and `.png` image uploads with 1-click clinical sample loaders (`patient_01_pneumonia`, `patient_02_effusion`, `patient_03_cardiomegaly`).
-  - **Side-by-Side De-Identification Matrix:** Full comparison table auditing raw HIPAA PII headers against anonymized counterparts with color-coded redaction badges.
-  - **Zero-Trust Storage Inspector:** Real-time AES-256-GCM container verification (`MEDENC01`), SHA-256 digest, Shannon entropy gauge ($\ge 7.99$ bits/byte), and binary hex wire preview.
-  - **Diagnostic AI & Grad-CAM Visualizer:** TorchXRayVision DenseNet121 probabilities across 5 thoracic diseases with calibrated epistemic uncertainty, emergency triage alerts (`STAT_CRITICAL`), and interactive Grad-CAM heatmap overlays with selectable target pathologies.
-  - **DPDP Act §12 Crypto-Shredder:** Interactive button demonstrating instant cryptographic erasure via Master KEK revocation.
+- **Primary Development UI (`http://localhost:5173`):** Run FastAPI on port `8000` and Vite dev server on port `5173` (`npm --prefix frontend run dev`). Vite proxies `/api/*` requests to `VITE_API_PROXY_TARGET` (`http://127.0.0.1:8000`).
+- **Unified Single-Container UI (`http://localhost:8000/`):** Build `frontend/` (`npm --prefix frontend run build`) and set `MEDSHIELD_SERVE_FRONTEND=true` (with `MEDSHIELD_REQUIRE_MTLS=false`).
+- **Built-in FastAPI Console (`http://localhost:8000/dashboard`):** Available directly from FastAPI when `MEDSHIELD_SERVE_FRONTEND=false`.
+- **Key Workstation Capabilities:**
+  - **Drag-and-Drop / Clipboard Ingestion & 1-Click Samples:** Supports `.dcm` and `.png`/`.jpg` uploads plus pre-packaged reference studies (`patient_01_pneumonia`, `patient_02_effusion`, `patient_03_cardiomegaly`).
+  - **Interactive Cornerstone3D PACS Viewer (`/workstation`):** Streams decrypted sanitized Part 10 DICOMs via `wadouri:`, with Window/Level, Pan, Zoom, Invert, and synchronized Grad-CAM opacity overlays.
+  - **Security & Safe Harbor Vault (`/security`):** Side-by-side raw vs. pixel-redacted comparison, DICOM PS 3.15 tag diff matrix, `MEDENC01` AES-256-GCM inspection, Shannon entropy ($\ge 7.99$ bits/byte), and two-step DPDP Act §12 Crypto-Shredding.
+  - **Zero-PII Scan Chat Drawer:** Multimodal clinical Q&A grounded strictly in DenseNet-121 probabilities and Grad-CAM spatial localization.
 
 ---
 
-## 7. Running the API Server & Endpoints
+## 7. Running the Servers & API Endpoints
 
-### Start the REST / DICOMweb Gateway
+### Start Backend API Server (Local Development)
 ```bash
 uvicorn medshield.api.app:app --host 0.0.0.0 --port 8000 --reload
 ```
+> **Production Note:** Always run Uvicorn with `--workers 1` because `LocalKMSProvider` keys, `_dashboard_worklist`, and `_dashboard_session_cache` live in process memory.
 
-Visit the interactive OpenAPI documentation at `http://localhost:8000/docs` and the web console at `http://localhost:8000/dashboard`.
+### Start Frontend Dev Server
+```bash
+npm --prefix frontend run dev
+```
+
+Visit OpenAPI docs at `http://localhost:8000/docs`, the React PACS Portal at `http://localhost:5173/`, or the standalone FastAPI console at `http://localhost:8000/dashboard`.
 
 ### Key API Endpoints
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
-| `GET` | `/dashboard` | Interactive Clinical Diagnostic & Security Console. |
-| `GET` | `/health` | System health status, active cryptographic engine, and model architecture. |
-| `POST` | `/api/v1/dashboard/analyze` | Unified diagnostic analysis for file uploads or pre-packaged samples. |
-| `GET` | `/api/v1/dashboard/samples` | Lists available pre-packaged patient test cases. |
-| `POST` | `/api/v1/dashboard/shred/{study_uid}` | Executes DPDP Section 12 Crypto-Shredding demonstration. |
-| `POST` | `/api/v1/studies` | **DICOMweb STOW-RS:** Ingests raw DICOM, runs PS 3.15 de-identification, blacks out pixel PHI, encrypts via AES-256-GCM, and persists to storage. |
+| `GET` | `/` | Redirects to `/dashboard`, or serves built React SPA `index.html` when `MEDSHIELD_SERVE_FRONTEND=true`. |
+| `GET` | `/dashboard` | Built-in FastAPI Clinical Reading & Security Console HTML page. |
+| `GET` | `/health` | System health status, TLS/mTLS flags, and cryptographic engine status. |
+| `GET` | `/api/v1/dashboard/samples` | Lists available pre-packaged patient test cases (`test_samples/`). |
+| `GET` | `/api/v1/dashboard/worklist` | Returns triage-sorted ingested worklist entries. |
+| `POST` | `/api/v1/dashboard/analyze` | Unified diagnostic & de-identification analysis for uploads, samples, or stored `study_uid`. |
+| `GET` | `/api/v1/dashboard/studies/{study_uid}/dicom` | Streams decrypted sanitized DICOM Part 10 bytes for Cornerstone3D `wadouri:` or download (`410` after shredding). |
+| `POST` | `/api/v1/dashboard/shred/{study_uid}` | Executes DPDP Section 12 Crypto-Shredding via study Master KEK revocation. |
+| `POST` | `/api/chat` | Zero-PII Multimodal Scan Chat endpoint (aliased at `/api/v1/dashboard/chat`). |
+| `POST` | `/api/v1/studies` | **DICOMweb STOW-RS:** Ingests raw DICOM, runs PS 3.15 de-identification, redacts pixel PHI, encrypts via AES-256-GCM, and persists to storage (mTLS protected when `MEDSHIELD_REQUIRE_MTLS=true`). |
 | `POST` | `/api/v1/inference/{study_uid}` | Decrypts study in volatile RAM, runs thoracic multi-label disease classifier, and outputs calibrated probabilities and triage urgency. |
 | `GET` | `/api/v1/heatmaps/{study_uid}/{pathology}` | Generates and returns a blended Grad-CAM PNG activation overlay for visual pathology localization. |
 
 ---
 
-## 8. Verification & Audit Suite
+## 8. Deployment
 
-### Run the Full Automated Test Suite (29 Tests)
+For full architectural guidance—covering why serverless functions are unsuitable for PyTorch + DenseNet-121 + EasyOCR, recommended **Split Deployment** (**Railway** / **Render** / **Fly.io** / **Cloud Run `min-instances=1`** backend + **Netlify** / **Vercel** / **Cloudflare Pages** frontend), **Unified Single-Container Docker** (`MEDSHIELD_SERVE_FRONTEND=true`), persistent volume mounts, and production security guards—read [**DEPLOYMENT.md**](DEPLOYMENT.md).
+
+Pre-configured deployment files included in the repository:
+- Backend Docker & PaaS: [`Dockerfile`](Dockerfile), [`.dockerignore`](.dockerignore), [`railway.toml`](railway.toml), [`render.yaml`](render.yaml), [`requirements-prod.txt`](requirements-prod.txt), [`.env.example`](.env.example)
+- Frontend Static SPA CDN: [`frontend/netlify.toml`](frontend/netlify.toml), [`frontend/vercel.json`](frontend/vercel.json), [`frontend/.env.example`](frontend/.env.example)
+
+---
+
+## 9. Verification & Audit Suite
+
+### Run the Automated Backend Test Suite
+Executes all 8 test modules in `tests/` (metadata stripping, pixel cleaning, crypto envelope, ML inference, API endpoints, compliance E2E, config, and zero-PII Scan Chat):
 ```bash
 python -m pytest tests/ -v
 ```
 
-All 29 tests across metadata stripping, pixel cleaning, crypto envelope, ML inference, API endpoints, and dashboard services will execute:
-```text
-======================= 29 passed in 27.93s =======================
-```
-
 ### Run the Standalone End-to-End Verification Pipeline
-MedShield-AI includes a comprehensive, standalone end-to-end verification script:
+MedShield-AI includes a comprehensive, standalone 8-phase verification script:
 ```bash
-python verify_e2e_pipeline.py
+python scripts/verify_e2e_pipeline.py
 ```
 
-This verifies the complete 8-phase workflow in under 3 seconds:
-1. Synthesizes a raw DICOM study with 11 detectable HIPAA identifiers and burned-in text.
+This verifies the complete workflow:
+1. Synthesizes a raw DICOM study with detectable HIPAA Safe Harbor identifiers and burned-in text.
 2. Ingests and sanitizes metadata and detects/inpaints burned-in text.
 3. Inspects encrypted storage, confirming Shannon entropy $\ge 7.99$ bits/byte and 0 plaintext leaks.
 4. Executes volatile RAM decryption and deep learning disease classification.
@@ -240,56 +291,86 @@ This verifies the complete 8-phase workflow in under 3 seconds:
 7. Validates cryptographic tamper resistance via AES-256-GCM authentication failure.
 8. Validates instant crypto-shredding under DPDP Act Section 12 via Master KEK revocation.
 
+### Run Frontend Lint & Production Build Checks
+```bash
+npm --prefix frontend run lint
+npm --prefix frontend run build
+```
+
 ---
 
-## 8. Directory Structure
+## 10. Directory Structure
 
 ```
 .
-├── pyproject.toml              # Build configuration and dependency definitions
-├── requirements.txt            # Production dependencies
-├── SPEC.md                     # Complete architectural design specification
-├── PLAN.md                     # Implementation plan and task roadmap
-├── RESEARCH.md                 # Deep research brief on architectures & benchmarks
-├── verify_e2e_pipeline.py      # Standalone 8-phase end-to-end verification script
+├── DEPLOYMENT.md                   # Split & unified deployment architecture guide
+├── Dockerfile                      # Multi-stage Node 22 + Python 3.11-slim CPU-PyTorch build
+├── .dockerignore                   # Excludes local weights/, storage/, tests/, node_modules/
+├── .env.example                    # Backend environment configuration template
+├── .gitignore                      # Ignores storage/, weights/, .env/.env.*, build caches
+├── pyproject.toml                  # Package metadata, dependencies & pytest config
+├── railway.toml                    # Railway Docker service + /health check config
+├── render.yaml                     # Render Docker service + 5 GB persistent disk config
+├── requirements.txt                # Full backend + dev/test dependencies
+├── requirements-prod.txt           # Runtime-only production dependencies for Docker
+├── skills-lock.json                # Installed skill provenance lockfile
+├── docs/                           # Architecture, research, specs & implementation plans
+│   ├── RESEARCH.md                 # Deep research brief on architectures & benchmarks
+│   ├── SPEC.md                     # Complete system design specification
+│   ├── PLAN.md                     # Implementation plan and task roadmap
+│   ├── FRONTEND_SPEC.md            # Clinical portal & Zero-PII Scan Chat specification
+│   └── superpowers/                # Detailed UI & Scan Chat implementation plans/specs
+├── scripts/
+│   └── verify_e2e_pipeline.py      # Standalone 8-phase end-to-end verification script
+├── test_samples/                   # Pre-packaged chest X-ray samples (.dcm & .png)
 ├── medshield/
-│   ├── anonymization/          # DICOM PS 3.15 Annex E and pixel redaction
-│   │   ├── metadata.py         # 18 Safe Harbor tag purger & sequence scrubber
-│   │   ├── uid_hasher.py       # Salted HMAC-SHA256 UID generator (2.25.x root)
-│   │   ├── date_shifter.py     # Deterministic patient-level date offset
-│   │   └── pixel_cleaner.py    # Margin text detector, dilation & blackout
-│   ├── crypto/                 # Cryptographic envelope storage engine
-│   │   ├── kms_provider.py     # FIPS 140-3 HSM/KMS key manager & revocation
-│   │   └── envelope.py         # MEDENC01 binary packer, AES-256-GCM cipher
-│   ├── ml/                     # Deep learning & explainability engine
-│   │   ├── model.py            # Thoracic multi-label classifier head
-│   │   ├── preprocessor.py     # 16-bit DICOM normalization & windowing
-│   │   ├── explainability.py   # Thread-safe Grad-CAM saliency heatmaps
-│   │   └── inference_engine.py # Clinical triage urgency & prediction orchestration
+│   ├── config.py                   # Pydantic settings, CORS, SPA serving & prod guards
+│   ├── anonymization/              # DICOM PS 3.15 Annex E and pixel redaction
+│   │   ├── metadata.py             # Safe Harbor tag purger & recursive sequence scrubber
+│   │   ├── uid_hasher.py           # Salted HMAC-SHA256 UID generator (2.25.x root)
+│   │   ├── date_shifter.py         # Deterministic patient-level date offset
+│   │   └── pixel_cleaner.py        # Margin text detector, dilation & blackout
+│   ├── crypto/                     # Cryptographic envelope storage engine
+│   │   ├── kms_provider.py         # Local KMS key manager & DPDP revocation
+│   │   └── envelope.py             # MEDENC01 binary packer & AES-256-GCM cipher
+│   ├── ml/                         # Deep learning, explainability & Scan Chat engine
+│   │   ├── model.py                # TorchXRayVision DenseNet-121 + EfficientNet-V2-S
+│   │   ├── preprocessor.py         # 16-bit DICOM normalization & windowing
+│   │   ├── explainability.py       # Thread-safe Grad-CAM saliency heatmaps
+│   │   ├── inference_engine.py     # Clinical triage urgency & prediction orchestration
+│   │   └── chat_service.py         # Zero-PII Gemini/MedGemma/offline clinical Scan Chat
 │   ├── storage/
-│   │   └── encrypted_store.py  # Atomic encrypted object store
-│   ├── api/                    # FastAPI Ingestion & DICOMweb Service
-│   │   ├── app.py              # Application factory & router configuration
-│   │   ├── middleware/         # mTLS auth and CERT-In audit logging
-│   │   └── routes/             # STOW-RS upload, inference, and heatmaps
+│   │   └── encrypted_store.py      # Atomic encrypted object store
+│   ├── api/                        # FastAPI Ingestion, Inference & Dashboard Service
+│   │   ├── app.py                  # Application factory, CORS, optional SPA static host
+│   │   ├── middleware/             # mTLS auth and CERT-In JSON audit logging
+│   │   └── routes/                 # STOW-RS upload, inference, heatmaps, dashboard & chat
 │   ├── utils/
-│   │   ├── dicom_helpers.py    # Pixel array extraction & dataset serialization
-│   │   └── logging.py          # Structured JSON audit logging formatter
-│   └── verification/           # Compliance scanning & security tests
-│       ├── compliance_scanner.py # 18-tag HIPAA Safe Harbor auditor
-│       └── entropy_analyzer.py   # Shannon entropy calculator (>= 7.99 bits/byte)
-└── tests/                      # Automated test suite (28 tests, 100% pass)
+│   │   ├── dicom_helpers.py        # Pixel array extraction & dataset serialization
+│   │   └── logging.py              # Structured JSON audit logging formatter
+│   └── verification/               # Compliance scanning & security audits
+│       ├── compliance_scanner.py   # HIPAA Safe Harbor auditor
+│       └── entropy_analyzer.py     # Shannon entropy calculator (>= 7.99 bits/byte)
+├── frontend/                       # React 19 + Vite + TypeScript + Cornerstone3D SPA
+│   ├── .env.example                # VITE_API_BASE_URL & VITE_API_PROXY_TARGET template
+│   ├── netlify.toml                # Netlify SPA build, redirect & security headers
+│   ├── vercel.json                 # Vercel SPA rewrite & asset caching headers
+│   ├── package.json                # React 19, Cornerstone3D WASM, Tailwind v4, Radix UI
+│   ├── vite.config.ts              # Vite build, WASM codecs & dev proxy config
+│   └── src/                        # Pages, components, Zustand store, API client
+└── tests/                          # Automated test suite across 8 modules
     ├── test_api_endpoints.py
     ├── test_compliance_e2e.py
     ├── test_config.py
     ├── test_crypto_envelope.py
     ├── test_metadata_anonymizer.py
     ├── test_ml_inference.py
-    └── test_pixel_cleaner.py
+    ├── test_pixel_cleaner.py
+    └── test_scan_chat.py
 ```
 
 ---
 
-## 9. License
+## 11. License
 
 This project is licensed under the Apache 2.0 License.

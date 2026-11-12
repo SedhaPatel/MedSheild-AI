@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: medshield-ai-api
+    runtime: docker
+    # PyTorch + TorchXRayVision DenseNet-121 + EasyOCR require >= 2 GB RAM (Render Standard or higher)
+    plan: standard
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    disk:
+      name: medshield-encrypted-studies
+      mountPath: /app/storage/encrypted_studies
+      sizeGB: 5
+    envVars:
+      - key: MEDSHIELD_ENVIRONMENT
+        value: production
+      - key: MEDSHIELD_SECRET_PEPPER
+        generateValue: true
+      - key: MEDSHIELD_REQUIRE_MTLS
+        value: "false"
+      - key: MEDSHIELD_STORAGE_PATH
+        value: /app/storage/encrypted_studies
+      - key: MEDSHIELD_SERVE_FRONTEND
+        value: "false"
+      - key: MEDSHIELD_CORS_ORIGINS
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: HF_API_TOKEN
+        sync: false

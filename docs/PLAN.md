@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.11+, FastAPI, Uvicorn, Pydicom, Cryptography (AES-256-GCM), PyTorch, Torchvision, ONNX Runtime, OpenCV, EasyOCR, NumPy, Pytest.
 
-**Spec:** [`SPEC.md`](file:///d:/ISC-Project/SPEC.md)
+**Spec:** [`docs/SPEC.md`](file:///d:/ISC-Project/docs/SPEC.md)
 
 ---
 
@@ -258,7 +258,7 @@ pytest --cov=medshield --cov-report=term-missing tests/
 
 ### Task 8: Zero-PII Multimodal Scan Chat Endpoint (`/api/chat`)
 
-> Detailed spec & task steps live in [`FRONTEND_SPEC.md`](file:///d:/ISC-Project/FRONTEND_SPEC.md) and [`docs/superpowers/plans/2026-11-12-scan-chat-implementation-plan.md`](file:///d:/ISC-Project/docs/superpowers/plans/2026-11-12-scan-chat-implementation-plan.md).
+> Detailed spec & task steps live in [`docs/FRONTEND_SPEC.md`](file:///d:/ISC-Project/docs/FRONTEND_SPEC.md) and [`docs/superpowers/plans/2026-11-12-scan-chat-implementation-plan.md`](file:///d:/ISC-Project/docs/superpowers/plans/2026-11-12-scan-chat-implementation-plan.md).
 
 **Files:**
 - Modify: `medshield/config.py`, `medshield/api/middleware/mtls_auth.py`, `medshield/api/routes/dashboard.py`

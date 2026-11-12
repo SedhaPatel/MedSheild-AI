@@ -17,8 +17,50 @@ export class ApiError extends Error {
   }
 }
 
-async function safeApiRequest<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init)
+const HAS_URL_SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i
+
+/**
+ * Returns the configured backend API origin without trailing slashes, or an
+ * empty string when relative same-origin paths should be used (Vite dev proxy
+ * or unified single-container deployments).
+ */
+export function getApiBaseUrl(): string {
+  const raw = import.meta.env.VITE_API_BASE_URL
+  if (typeof raw !== 'string') return ''
+  return raw.trim().replace(/\/+$/, '')
+}
+
+/**
+ * Resolves a backend API path against `VITE_API_BASE_URL` when configured,
+ * preserving relative `/api/...` URLs when unset or empty.
+ */
+export function resolveApiUrl(path: string): string {
+  if (HAS_URL_SCHEME_RE.test(path) || path.startsWith('//')) {
+    return path
+  }
+  const base = getApiBaseUrl()
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  return base ? `${base}${normalizedPath}` : normalizedPath
+}
+
+/**
+ * Resolves an API path to a fully qualified URL with scheme + host, suitable
+ * for Cornerstone3D `wadouri:` imageIds across both split-origin CDN and
+ * same-origin deployments.
+ */
+export function resolveAbsoluteApiUrl(path: string): string {
+  const resolved = resolveApiUrl(path)
+  if (HAS_URL_SCHEME_RE.test(resolved)) {
+    return resolved
+  }
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return new URL(resolved, window.location.origin).toString()
+  }
+  return resolved
+}
+
+async function safeApiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(resolveApiUrl(path), init)
   const raw = await res.text()
 
   let parsed: unknown
@@ -92,7 +134,7 @@ export async function shredStudyKey(studyUid: string): Promise<ShredResponse> {
 }
 
 export function getDicomDownloadUrl(studyUid: string, download = false): string {
-  const base = `/api/v1/dashboard/studies/${encodeURIComponent(studyUid)}/dicom`
+  const base = resolveApiUrl(`/api/v1/dashboard/studies/${encodeURIComponent(studyUid)}/dicom`)
   return download ? `${base}?download=true` : base
 }
 

@@ -1,0 +1,50 @@
+# Version control & local tooling
+.git
+.gitignore
+.worktrees
+.agents
+.claude
+.superpowers
+skills-lock.json
+.interface-design
+
+# Python caches, test artifacts & virtual environments
+__pycache__
+*.py[cod]
+*$py.class
+.pytest_cache
+.coverage
+htmlcov
+.venv
+venv
+dist
+build
+*.egg-info
+
+# Local secrets & environment files (never bake real keys into container images)
+.env
+**/.env
+.env.*
+**/.env.*
+!.env.example
+!frontend/.env.example
+
+# Local runtime state & model cache (created/mounted cleanly in container)
+storage
+weights
+
+# Frontend dependencies & stale local builds (rebuilt inside Docker builder stage)
+frontend/node_modules
+frontend/dist
+node_modules
+
+# Tests, helper scripts & project planning docs (keep README.md for pyproject.toml & test_samples/ for demo cases)
+tests
+scripts
+docs
+RESEARCH.md
+SPEC.md
+PLAN.md
+FRONTEND_SPEC.md
+DEPLOYMENT.md
+verify_e2e_pipeline.py

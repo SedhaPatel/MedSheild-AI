@@ -8,6 +8,9 @@ dist/
 build/
 *.egg-info/
 .env
+.env.*
+!.env.example
+!frontend/.env.example
 .superpowers/
 .agents/
 skills-lock.json

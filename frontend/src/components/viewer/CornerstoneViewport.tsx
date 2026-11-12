@@ -9,6 +9,7 @@ import {
   ensureCornerstoneReady,
   setPrimaryMouseTool,
 } from '@/lib/initCornerstone'
+import { resolveAbsoluteApiUrl } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useWorkstationStore } from '@/stores/useWorkstationStore'
 import { ViewportToolbar } from '@/components/viewer/ViewportToolbar'
@@ -117,7 +118,7 @@ export function CornerstoneViewport() {
       const viewport = engineRef.current.getViewport(WORKSTATION_VIEWPORT_ID) as Types.IStackViewport | undefined
       if (!viewport) return
 
-      const imageId = `wadouri:${window.location.origin}${activeStudy.dicom_url}`
+      const imageId = `wadouri:${resolveAbsoluteApiUrl(activeStudy.dicom_url)}`
       try {
         await viewport.setStack([imageId], 0)
         if (cancelled) return

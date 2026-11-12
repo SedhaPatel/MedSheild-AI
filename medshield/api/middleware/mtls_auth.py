@@ -20,6 +20,10 @@ class MTLSAuthMiddleware(BaseHTTPMiddleware):
         if request.url.path in ("/docs", "/openapi.json", "/health", "/", "/dashboard", "/api/chat") or request.url.path.startswith("/api/v1/dashboard"):
             return await call_next(request)
 
+        # Allow public SPA static assets and client-side routes when unified frontend serving is enabled
+        if self.settings.serve_frontend_dist and request.method in ("GET", "HEAD") and not request.url.path.startswith("/api"):
+            return await call_next(request)
+
         if self.settings.require_mtls:
             cert_fingerprint = request.headers.get("X-Client-Cert-SHA256")
             if not cert_fingerprint:

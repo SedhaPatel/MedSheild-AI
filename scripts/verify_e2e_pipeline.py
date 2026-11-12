@@ -2,7 +2,7 @@
 """
 MedShield-AI: Comprehensive End-to-End Pipeline & Regulatory Verification Script
 ================================================================================
-Validates the complete clinical AI workflow against SPEC.md requirements:
+Validates the complete clinical AI workflow against docs/SPEC.md requirements:
   [Phase 1] DICOM Generation with Heavy PHI & Burned-In Text Annotation
   [Phase 2] Ingestion, DICOM PS 3.15 Annex E De-ID & Pixel OCR Redaction
   [Phase 3] AES-256-GCM Envelope Encryption (KEK/DEK) & Shannon Entropy Storage Check
@@ -18,6 +18,12 @@ import os
 import sys
 import shutil
 import tempfile
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 import numpy as np
 from PIL import Image, ImageDraw
 import pydicom
@@ -316,5 +322,6 @@ def run_e2e_verification():
 
 
 if __name__ == "__main__":
+    os.chdir(ROOT_DIR)
     success = run_e2e_verification()
     sys.exit(0 if success else 1)
