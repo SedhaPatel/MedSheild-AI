@@ -9,7 +9,7 @@ This guide explains **where and how to deploy the MedShield-AI backend and front
 ### Backend (`medshield/`)
 - **Web & ASGI Runtime:** Python 3.11+ (`requires-python >= 3.10`, Docker `python:3.11-slim`), `FastAPI` (`>=0.110.0`), `Uvicorn` (`uvicorn[standard]>=0.28.0`), `python-multipart`, `Pydantic` (`>=2.5.0`) / `pydantic-settings`.
 - **Deep Learning & Explainability:** CPU `PyTorch` (`>=2.0.0`), `TorchVision` (`>=0.15.0`), `TorchXRayVision` (`>=1.2.0` — pre-trained `DenseNet-121` `densenet121-res224-all` + `EfficientNet-V2-S` fallback), thread-safe `GradCAM` backward-hook heatmap generation.
-- **Pixel PHI Redaction & Vision:** `EasyOCR` (`>=1.7.0`), `OpenCV` (`opencv-python-headless>=4.8.0`), `NumPy`, `SciPy`, `Pillow` (requiring OS libs `libgl1`, `libglib2.0-0`, `libgomp1` in Linux containers).
+- **Pixel PHI Redaction & Vision:** SciPy morphology-based burned-in text detector (no OCR models), `OpenCV` (`opencv-python-headless>=4.8.0`), `NumPy`, `SciPy`, `Pillow` (requiring OS libs `libgl1`, `libglib2.0-0`, `libgomp1` in Linux containers).
 - **Medical Imaging & Cryptography:** `pydicom` (`>=2.4.0`), `cryptography` (`>=42.0.0`, `AES-256-GCM` `MEDENC01` envelope encryption, `LocalKMSProvider`).
 - **Zero-PII Scan Chat Assistant:** `httpx` (`>=0.24.0`) calling Gemini (`gemini-2.5-flash`) or MedGemma (`google/medgemma-1.5-4b-it`), with a deterministic `grounded-local-fallback` synthesizer when API keys are omitted.
 
@@ -29,8 +29,8 @@ This guide explains **where and how to deploy the MedShield-AI backend and front
 
 ### Why Serverless Functions Are NOT Viable for the Backend
 Do **not** deploy the FastAPI backend to **Vercel Serverless Functions**, **AWS Lambda (standard zip)**, or **Cloudflare Workers**:
-1. **Bundle Size & Native Runtime Limits:** CPU `torch` + `torchvision` + `torchxrayvision` + `opencv-python-headless` + `easyocr` + `scipy` + Linux shared libraries (`libgl1`, `libglib2.0-0`, `libgomp1`) far exceed typical serverless deployment limits (e.g., 250 MB unzipped limits on Vercel/Lambda), and Cloudflare Workers V8 isolates cannot execute Python PyTorch/OpenCV C-extensions.
-2. **Memory & Cold-Start Timeouts:** Initializing PyTorch, loading the `DenseNet-121` checkpoint (`~28 MB` `.pt`), running EasyOCR, and executing `GradCAM` gradient backward passes requires **2 GB RAM minimum (4 GB recommended)** and exceeds short serverless request/cold-start timeouts.
+1. **Bundle Size & Native Runtime Limits:** CPU `torch` + `torchvision` + `torchxrayvision` + `opencv-python-headless` + `scipy` + Linux shared libraries (`libgl1`, `libglib2.0-0`, `libgomp1`) far exceed typical serverless deployment limits (e.g., 250 MB unzipped limits on Vercel/Lambda), and Cloudflare Workers V8 isolates cannot execute Python PyTorch/OpenCV C-extensions.
+2. **Memory & Cold-Start Timeouts:** Initializing PyTorch, loading the `DenseNet-121` checkpoint (`~28 MB` `.pt`) and executing `GradCAM` gradient backward passes requires **2 GB RAM minimum (4 GB recommended)** and exceeds short serverless request/cold-start timeouts.
 3. **Stateful Process & Disk Persistence:** `LocalKMSProvider` holds KEKs and DPDP Sec. 12 revocation state in process RAM, `medshield/api/routes/dashboard.py` holds `_dashboard_worklist` and `_dashboard_session_cache` in memory, and `EncryptedStore` writes atomic `.enc` files to disk. Ephemeral serverless workers would discard keys, worklists, and studies between invocations.
 
 ---
@@ -116,7 +116,7 @@ uvicorn medshield.api.app:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1
 Do **not** scale `--workers > 1` without first externalizing state. Currently:
 - `LocalKMSProvider` (`_dashboard_kms` in [`dashboard.py`](medshield/api/routes/dashboard.py) and `_shared_kms` in [`studies.py`](medshield/api/routes/studies.py)) holds Master KEKs and key revocation status in process memory.
 - `_dashboard_worklist` and `_dashboard_session_cache` live in process memory.
-- Multiple workers would isolate KEK dictionaries per worker process (causing decryption failures / HTTP 410 across requests) and multiply PyTorch + EasyOCR RAM usage.
+- Multiple workers would isolate KEK dictionaries per worker process (causing decryption failures / HTTP 410 across requests) and multiply PyTorch RAM usage.
 
 ### 2. Production `MEDSHIELD_SECRET_PEPPER` Guard
 In [`medshield/config.py`](medshield/config.py), `Settings.model_post_init()` enforces a non-default salt whenever `MEDSHIELD_ENVIRONMENT=production`:
@@ -135,7 +135,7 @@ In [`medshield/api/middleware/mtls_auth.py`](medshield/api/middleware/mtls_auth.
 
 ### 4. Encrypted Storage & Model Weights Volumes
 - **Encrypted Studies (`/app/storage/encrypted_studies`):** `Dockerfile` creates `/app/storage/encrypted_studies` owned by non-root user `medshield` (`uid 10001`). Mount a persistent disk here in production. Note that because `LocalKMSProvider` keeps KEKs in RAM, restarting the container clears in-memory KEKs even if `.enc` files remain on disk (a real HSM/Cloud KMS implementation of `KMSProvider` is required for cross-restart study decryption).
-- **Model Weights Cache (`/app/weights`):** [`.dockerignore`](.dockerignore) excludes local `weights/` from the image build context. `Dockerfile` sets `TORCH_HOME=/app/weights` and `EASYOCR_MODULE_PATH=/app/weights` with writable permissions. On first model load, `TorchXRayVisionClassifier` checks `/app/weights` for `nih-pc-chex-mimic_ch-google-openi-kaggle-densenet121-d121-tw-lr001-rot45-tr15-sc15-seed0-best.pt` and downloads `densenet121-res224-all` if absent (falling back to uninitialized DenseNet / `EfficientNet-V2-S` if offline). Mount a volume at `/app/weights` to avoid re-downloading weights on container replacement.
+- **Model Weights Cache (`/app/weights`):** [`.dockerignore`](.dockerignore) excludes local `weights/` from the image build context. `Dockerfile` sets `TORCH_HOME=/app/weights` with writable permissions. On first model load, `TorchXRayVisionClassifier` checks `/app/weights` for `nih-pc-chex-mimic_ch-google-openi-kaggle-densenet121-d121-tw-lr001-rot45-tr15-sc15-seed0-best.pt` and downloads `densenet121-res224-all` if absent (falling back to uninitialized DenseNet / `EfficientNet-V2-S` if offline). Mount a volume at `/app/weights` to avoid re-downloading weights on container replacement.
 - **Built-in Demo Cases:** `test_samples/` is copied into `/app/test_samples/` so the 3 pre-packaged chest radiographs (`patient_01_pneumonia`, `patient_02_effusion`, `patient_03_cardiomegaly`) work out of the box.
 
 ---
@@ -154,7 +154,8 @@ In [`medshield/api/middleware/mtls_auth.py`](medshield/api/middleware/mtls_auth.
 | `MEDSHIELD_SERVE_FRONTEND` | `false` | Set `true` only for unified container | Serves built Vite SPA (`frontend/dist`) from FastAPI |
 | `MEDSHIELD_FRONTEND_DIST_DIR` | `./frontend/dist` (`/app/frontend/dist` in Docker) | Only when unified | Path to built Vite production bundle |
 | `MEDSHIELD_KMS_MASTER_KEY_ID` | `arn:medshield:kms:local:key/master-kek-v1` | Optional | Base Master KEK identifier |
-| `MEDSHIELD_MODEL_ARCHITECTURE` | `efficientnet_v2_s` | Optional | Fallback backbone setting (`torchxrayvision` DenseNet-121 loads when weights/package available) |
+| `MEDSHIELD_KMS_KEYSTORE_PATH` | *(empty: in-memory)* | Optional | Persist local KMS keys to a 0600 JSON file so studies survive restarts. Dev only: keep off the storage volume; use a real KMS/HSM in production |
+| `MEDSHIELD_MODEL_ARCHITECTURE` | `torchxrayvision` | Optional | `torchxrayvision` (pre-trained DenseNet-121) or `efficientnet_v2_s` (untrained; requires `MEDSHIELD_MODEL_CHECKPOINT_PATH`) |
 | `MEDSHIELD_MODEL_CHECKPOINT_PATH` | `None` | Optional | Explicit path to custom `.pt` weights |
 | `MEDSHIELD_CHAT_PROVIDER` | `gemini` | Optional | `gemini` or `medgemma` (`huggingface`) |
 | `GEMINI_API_KEY` | `None` | Optional | Enables Gemini multimodal Scan Chat (falls back offline if blank) |
