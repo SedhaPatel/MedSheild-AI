@@ -257,6 +257,29 @@ def compute_heatmap_zone_summary(heatmap_pil: Optional[Image.Image]) -> str:
     return f"Peak saliency localized in the {peak}."
 
 
+def score_verdict(p: Dict[str, Any]) -> str:
+    """POSITIVE / NEGATIVE relative to the model's operating threshold (score 0.5)."""
+    if "is_positive" in p:
+        return "POSITIVE" if p["is_positive"] else "NEGATIVE"
+    return "POSITIVE" if float(p.get("probability", 0.0)) >= 0.5 else "NEGATIVE"
+
+
+def format_score(p: Dict[str, Any]) -> str:
+    """Human-readable score, e.g. 'score 0.34 (NEGATIVE; 0.50 = model threshold)'."""
+    return f"score {float(p.get('probability', 0.0)):.2f} ({score_verdict(p)}; 0.50 = model threshold)"
+
+
+def short_score(p: Dict[str, Any]) -> str:
+    """Score without the verdict, for sentences that already state POSITIVE/NEGATIVE."""
+    return f"score {float(p.get('probability', 0.0)):.2f}; 0.50 = model threshold"
+
+
+SCORE_EXPLANATION = (
+    "Scores are threshold-normalized: 0.50 is the model's operating threshold (>= 0.50 = positive). "
+    "They are not calibrated probabilities and must not be quoted as a percentage chance of disease."
+)
+
+
 def build_grounded_system_prompt(
     predictions: Any,
     target_pathology: str,
@@ -265,7 +288,7 @@ def build_grounded_system_prompt(
     heatmap_analysis: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
-    Constructs the grounded clinical system instruction containing calibrated model metrics,
+    Constructs the grounded clinical system instruction containing threshold-normalized model scores,
     telemetry, spatial localization, and strict HIPAA Safe Harbor zero-PII directives.
     """
     if isinstance(predictions, dict) and "predictions" in predictions:
@@ -278,13 +301,8 @@ def build_grounded_system_prompt(
     findings_lines: List[str] = []
     for p in preds_list:
         pathology = p.get("pathology", "Unknown")
-        prob = float(p.get("probability", 0.0))
-        uncertainty = float(p.get("epistemic_uncertainty", 0.0))
         urgency = p.get("triage_urgency", "ROUTINE")
-        findings_lines.append(
-            f"- {pathology}: {prob * 100:.1f}% calibrated probability "
-            f"(Epistemic uncertainty: {uncertainty:.4f}, Triage urgency: {urgency})"
-        )
+        findings_lines.append(f"- {pathology}: {format_score(p)}, Triage urgency: {urgency}")
 
     findings_text = "\n".join(findings_lines) if findings_lines else "No quantitative findings available."
 
@@ -314,11 +332,12 @@ Strictly adhere to HIPAA Safe Harbor and zero-PII constraints. The scan provided
 
 GROUNDED MODEL METRICS (DenseNet-121 Classifier):
 Target Pathology Under Review: {target_pathology}
+{SCORE_EXPLANATION}
 {findings_text}{heatmap_text}{telemetry_text}
 
 RESPONSE GUIDELINES:
 1. Ground all diagnostic discussions strictly in the validated model findings and the visual scan provided.
-2. Discuss the probability, uncertainty, and anatomical region highlighting the condition.
+2. Discuss each finding as positive or negative relative to the model threshold, and the anatomical region highlighting it. Never present a score as a percentage chance or probability. Scores near 0.50 are borderline and should be described as uncertain.
 3. If asked about anomalies outside the model's target pathologies, provide objective observational feedback based solely on the visual radiograph, noting that it is unclassified by the model.
 4. Maintain an objective, disciplined clinical tone.
 
@@ -355,7 +374,7 @@ def synthesize_offline_grounded_reply(
         pred_map[p_name.lower()] = {
             "pathology": p_name,
             "probability": float(p.get("probability", 0.0)),
-            "epistemic_uncertainty": float(p.get("epistemic_uncertainty", 0.0)),
+            "is_positive": score_verdict(p) == "POSITIVE",
             "triage_urgency": p.get("triage_urgency", "ROUTINE")
         }
 
@@ -367,54 +386,49 @@ def synthesize_offline_grounded_reply(
             target_info = {
                 "pathology": top_p.get("pathology", target_pathology),
                 "probability": float(top_p.get("probability", 0.0)),
-                "epistemic_uncertainty": float(top_p.get("epistemic_uncertainty", 0.0)),
+                "is_positive": score_verdict(top_p) == "POSITIVE",
                 "triage_urgency": top_p.get("triage_urgency", "ROUTINE"),
             }
         else:
             target_info = {
                 "pathology": target_pathology,
                 "probability": 0.0,
-                "epistemic_uncertainty": 0.0,
+                "is_positive": False,
                 "triage_urgency": "ROUTINE",
             }
 
-    # Resolved heatmap zone details
+    # Heatmap localization (zone names come from analyze_heatmap_zones)
     if heatmap_analysis and heatmap_analysis.get("has_heatmap"):
-        peak_zone = heatmap_analysis.get("peak_zone", "unspecified lung field")
-        secondary_zone = heatmap_analysis.get("secondary_zone", "diffuse secondary zone")
+        peak_zone = heatmap_analysis.get("peak_zone", "")
+        secondary_zone = heatmap_analysis.get("secondary_zone", "")
         focus_pct = heatmap_analysis.get("focus_percentage", 0.0)
-        resolved_heatmap_text = f"Peak saliency localized in the {peak_zone}. Secondary activation in {secondary_zone} ({focus_pct}% focal area)."
     elif heatmap_zone_summary:
-        resolved_heatmap_text = heatmap_zone_summary
-        peak_zone = heatmap_zone_summary
-        secondary_zone = "adjacent field"
-        focus_pct = 0.0
+        peak_zone, secondary_zone, focus_pct = heatmap_zone_summary, "", 0.0
     else:
-        resolved_heatmap_text = "No focal heatmap localization available."
-        peak_zone = "central lung field"
-        secondary_zone = "perihilar zone"
-        focus_pct = 0.0
+        peak_zone, secondary_zone, focus_pct = "", "", 0.0
 
-    # Resolved telemetry details
-    telemetry_str = ""
-    if scan_telemetry:
-        dr = scan_telemetry.get("dynamic_range", "N/A")
-        cs = scan_telemetry.get("contrast_std", "N/A")
-        lr = scan_telemetry.get("left_vs_right_asymmetry", {})
-        vd = scan_telemetry.get("vertical_density", {})
-        telemetry_str = (
-            f"Pixel telemetry confirms dynamic range {dr}, contrast std ±{cs}, "
-            f"hemithorax density ratio (L/R) {lr.get('ratio', '1.0')}, "
-            f"apical-to-basilar density ratio {vd.get('upper_to_lower_ratio', '1.0')}."
-        )
+    def verdict_word(p: Dict[str, Any]) -> str:
+        score = float(p.get("probability", 0.0))
+        if 0.4 <= score < 0.6:
+            return "borderline " + ("positive" if score >= 0.5 else "negative")
+        return "positive" if score >= 0.5 else "negative"
 
-    # All findings lines
-    findings_lines = [
-        f"- **{p.get('pathology', 'Unknown')}**: {float(p.get('probability', 0.0)) * 100:.1f}% "
-        f"({p.get('triage_urgency', 'ROUTINE')}, uncertainty ±{float(p.get('epistemic_uncertainty', 0.0)):.4f})"
-        for p in preds_list
-    ]
-    findings_block = "\n".join(findings_lines) if findings_lines else "- No model findings registered."
+    def plain_score(p: Dict[str, Any]) -> str:
+        return f"{verdict_word(p)}, score {float(p.get('probability', 0.0)):.2f}"
+
+    ranked = sorted(preds_list, key=lambda x: float(x.get("probability", 0.0)), reverse=True)
+    findings_block = "\n".join(
+        f"- {p.get('pathology', 'Unknown')}: {plain_score(p)}" for p in ranked
+    ) or "- No model findings available."
+    positives = [p.get("pathology", "Unknown") for p in ranked if float(p.get("probability", 0.0)) >= 0.5]
+    target_name = target_info["pathology"]
+    target_score = float(target_info["probability"])
+    target_urgency = target_info.get("triage_urgency", "ROUTINE")
+    urgency_word = {"STAT_CRITICAL": "STAT", "ELEVATED": "elevated", "ROUTINE": "routine"}.get(target_urgency, "routine")
+    threshold_note = (
+        "Scores run from 0 to 1 and 0.50 is the model's threshold; a score is a yes/no signal, "
+        "not a percentage chance of disease."
+    )
 
     q_lower = user_message.lower()
 
@@ -448,204 +462,147 @@ def synthesize_offline_grounded_reply(
     )) or ("explain" in q_lower and not is_heatmap_query and not is_steps_query)
 
     is_differential_query = bool(re.search(
-        r"\b(?:uncertain\w*|sure|compare\w*|differential|normal|other|confidence|reliability|epistemic)\b",
+        r"\b(?:uncertain\w*|sure|compare\w*|differential|normal|other|confiden\w*|reliab\w*|accura\w*|trust\w*|epistemic)\b",
         q_lower,
     ))
 
-    # Build specialized reply sections
     if is_heatmap_query:
-        reply = f"""**Visual Explainability & Spatial Saliency Analysis**
+        if peak_zone:
+            where = f"For {target_name}, the heatmap is strongest in the {peak_zone}"
+            where += f", with a secondary area in the {secondary_zone}" if secondary_zone else ""
+            where += f". About {focus_pct}% of the image is highlighted." if focus_pct else "."
+        else:
+            where = f"No heatmap was generated for {target_name} with this question. Turn on the heatmap overlay and ask again."
+        reply = f"""**Where the heatmap is focused**
 
-**Heatmap Localization Findings:**
-- **Primary Activation Focus**: {peak_zone}
-- **Secondary Saliency Zone**: {secondary_zone}
-- **Focal Activation Coverage**: {focus_pct}% of thoracic image field
+{where}
 
-**Target Pathology Correlation ({target_info['pathology']}):**
-The Grad-CAM explainability engine identified maximal activation in the {peak_zone}, contributing directly to the model's calibrated probability of **{target_info['probability'] * 100:.1f}%** ({target_info['triage_urgency']} triage priority).
+A heatmap shows which regions most influenced the model's score. It does not outline disease, and one is drawn even when the result is negative. Here the {target_name} result is {plain_score(target_info)}.
 
-**Thoracic Anatomy & Telemetry Integration:**
-{telemetry_str if telemetry_str else 'Thoracic density patterns align with the localized focal saliency.'}
-In thoracic imaging, focal saliency in this region corresponds to parenchyma, bronchovascular bundles, or pleural interfaces requiring close radiologic inspection.
-
-**Multi-Label Classifier Findings:**
+**All findings**
 {findings_block}"""
 
     elif is_steps_query:
-        urgency = target_info.get('triage_urgency', 'ROUTINE')
-        if urgency in ("STAT_CRITICAL", "URGENT"):
-            ct_recommendation = "Urgent non-contrast high-resolution chest CT (HRCT) with immediate clinician overread"
-            clinical_guidance = "Immediate emergency/STAT triage priority. Urgent attending clinician evaluation required."
-        elif urgency == "ELEVATED":
-            ct_recommendation = "Expedited high-resolution chest CT (HRCT) or contrast-enhanced thoracic imaging within 24–48 hours"
-            clinical_guidance = "Elevated triage priority. Arrange expedited diagnostic correlation and close clinical monitoring."
+        if target_urgency == "STAT_CRITICAL":
+            steps = [
+                "Have a radiologist review this study promptly; the model placed it in the STAT priority group.",
+                "Correlate with the patient's symptoms and vital signs.",
+                "If the finding is confirmed, follow your local urgent pathway; CT may help where the X-ray is unclear.",
+            ]
+        elif target_urgency == "ELEVATED":
+            steps = [
+                "Arrange an expedited radiologist read; the model placed it in the elevated priority group.",
+                "Correlate with symptoms, examination and any prior imaging.",
+                "Consider a lateral view or follow-up imaging if the finding is uncertain.",
+            ]
         else:
-            ct_recommendation = "Elective or follow-up chest CT if symptoms persist"
-            clinical_guidance = "Routine clinical priority. Standard outpatient monitoring and elective follow-up if symptoms persist."
+            steps = [
+                "Read this study in routine order; no finding was above the model's threshold.",
+                "A negative model result does not rule out disease. Clinical concern should still guide further tests.",
+            ]
+        steps_text = "\n".join(f"{n}. {step}" for n, step in enumerate(steps, 1))
+        reply = f"""**Suggested next steps**
 
-        reply = f"""**Recommended Clinical Next Steps & Diagnostic Workup**
+Priority: **{urgency_word}** ({target_name}: {plain_score(target_info)}).
 
-**Triage Priority Classification:**
-- **Target Condition**: **{target_info['pathology']}** ({target_info['probability'] * 100:.1f}% calibrated probability)
-- **Triage Urgency Level**: **{urgency}** (Epistemic uncertainty: ±{target_info['epistemic_uncertainty']:.4f})
-- **Priority Clinical Guidance**: {clinical_guidance}
+{steps_text}
 
-**Recommended Clinical Action Plan:**
-1. **Confirmatory Imaging & Workup**:
-   - {ct_recommendation} to evaluate parenchymal architecture and confirm findings localized in the {peak_zone}.
-   - Correlate with standing lateral projection to resolve 3D spatial overlap.
-2. **Laboratory & Biomarker Correlation**:
-   - Obtain complete blood count (CBC with differential), inflammatory markers (CRP / ESR), and pulse oximetry (SpO2).
-   - If infectious etiology is suspected, consider sputum cultures or viral panel.
-3. **Clinical Monitoring Protocol**:
-   - Assess for dyspnea, pleuritic chest pain, fever, or tachycardia.
-   - Schedule repeat follow-up radiograph in 48–72 hours to assess therapeutic response or progression.
+These are general suggestions based only on the model's priority level, not on this patient's history.
 
-**Multi-Label Classifier Findings:**
+**All findings**
 {findings_block}"""
 
     elif queried_pathology:
         p_data = pred_map.get(queried_pathology.lower(), {
             "pathology": queried_pathology,
             "probability": 0.0,
-            "epistemic_uncertainty": 0.0,
+            "is_positive": False,
             "triage_urgency": "ROUTINE"
         })
-        p_prob = p_data["probability"] * 100.0
-        p_urgency = p_data["triage_urgency"]
-        p_uncertainty = p_data["epistemic_uncertainty"]
-
-        if p_prob >= 50.0:
-            evidence_summary = (
-                f"The AI model identified substantial radiologic features consistent with **{queried_pathology}**, "
-                f"evaluating it at **{p_prob:.1f}%** calibrated probability ({p_urgency} priority)."
-            )
-        elif p_prob >= 20.0:
-            evidence_summary = (
-                f"The AI model identified moderate or borderline features for **{queried_pathology}** "
-                f"at **{p_prob:.1f}%** calibrated probability ({p_urgency} priority), warranting clinical correlation."
+        p_score = float(p_data["probability"])
+        if p_score >= 0.6:
+            meaning = f"The model found image features it associates with {queried_pathology.lower()}."
+        elif p_score >= 0.4:
+            meaning = (
+                "This is close to the threshold, so treat it as uncertain: small changes to the image, such as "
+                "cropping or compression, can flip a result like this."
             )
         else:
-            evidence_summary = (
-                f"The AI model found low evidence for **{queried_pathology}** at **{p_prob:.1f}%** calibrated probability. "
-                f"No dominant acute features for this specific condition were detected in the primary lung fields."
-            )
+            meaning = f"The model did not find the features it associates with {queried_pathology.lower()}."
+        reply = f"""**{queried_pathology}: {verdict_word(p_data)}**
 
-        reply = f"""**Targeted Pathology Assessment: {queried_pathology}**
+The model's result for {queried_pathology.lower()} is {plain_score(p_data)}. {meaning}
 
-**Pathology Evidence Summary:**
-{evidence_summary}
+{threshold_note}
 
-**Quantitative Calibration Metrics:**
-- **Calibrated Probability**: **{p_prob:.1f}%**
-- **Epistemic Model Uncertainty**: ±{p_uncertainty:.4f}
-- **Assigned Triage Urgency**: {p_urgency}
-
-**Spatial & Telemetry Context:**
-- **Heatmap Activation**: {resolved_heatmap_text}
-- {telemetry_str if telemetry_str else 'Radiographic densities are calibrated against standard normal thoracic ranges.'}
-
-**Complete Multi-Label Findings:**
+**All findings**
 {findings_block}"""
 
     elif is_simple_query:
-        target_name = target_info['pathology']
-        prob_pct = target_info['probability'] * 100.0
+        is_pos = target_score >= 0.5
+        if target_score >= 0.6:
+            result_sentence = f"The computer model flagged signs it associates with **{target_name.lower()}**."
+        elif target_score >= 0.4:
+            result_sentence = f"The computer model's result for **{target_name.lower()}** is borderline, so it can't call it either way."
+        else:
+            result_sentence = f"The computer model did not find signs of **{target_name.lower()}**."
 
         if "pneumonia" in target_name.lower():
-            plain_explanation = (
-                "The computer scan analysis looked for signs of lung infection like pneumonia. "
-                "In simple terms, healthy lungs look mostly dark and clear on an X-ray because air lets the rays pass through. "
-                "Here, the scan shows cloudier or hazier patches in the lung field where fluid or inflammation might be present."
-            )
+            background = ("Healthy lungs look mostly dark on an X-ray because air lets the rays through. "
+                          "Pneumonia tends to show up as cloudy or hazy patches.")
         elif "cardiomegaly" in target_name.lower():
-            plain_explanation = (
-                "The scan analysis evaluated the size of the heart. "
-                "In plain language, it checks whether the heart shadow appears wider than normal across the chest cavity, "
-                "which doctors call an enlarged heart."
-            )
+            background = "Cardiomegaly means an enlarged heart: the heart shadow looks wider than about half the chest."
         elif "effusion" in target_name.lower():
-            plain_explanation = (
-                "The scan analysis checked for fluid pooling around the bottom of the lungs (pleural effusion). "
-                "In clear terms, extra fluid tends to collect in the lowest corners of the chest, creating blunted or grayed edges."
-            )
+            background = "A pleural effusion is fluid around the lungs, which usually collects at the bottom corners of the chest."
         elif "pneumothorax" in target_name.lower():
-            plain_explanation = (
-                "The scan looked for trapped air between the lung and the chest wall (a collapsed lung or pneumothorax). "
-                "In simple terms, air in that space can press against the lung tissue."
-            )
+            background = "A pneumothorax is air between the lung and the chest wall, which can make part of the lung collapse."
         else:
-            plain_explanation = (
-                f"The computer analysis evaluated the chest X-ray for patterns of **{target_name}**. "
-                "In simple terms, it compares the brightness and texture of your lung and chest structures against thousands of medical scans."
-            )
+            background = f"The model compares the image with patterns it learned for {target_name.lower()}."
 
-        chance_str = (
-            f"a high probability ({prob_pct:.1f}%)"
-            if prob_pct >= 60.0
-            else f"a moderate likelihood ({prob_pct:.1f}%)"
-            if prob_pct >= 25.0
-            else f"a low chance ({prob_pct:.1f}%)"
-        )
+        reply = f"""**In plain terms**
 
-        reply = f"""**Plain-Language Scan Explanation (In Simple Terms)**
+{result_sentence} {background}
 
-**What the AI Found in Plain English:**
-{plain_explanation}
+The number next to it ({float(target_score):.2f}) is not a percentage chance. The model says "yes" above 0.50 and "no" below it.
 
-**What the Numbers Mean:**
-The AI model calculated **{chance_str}** for **{target_name}**.
-{f"The highlighted area points to the {peak_zone}, meaning that is the part of the image that drew the model's focus." if peak_zone != 'None' else ""}
-
-**What You Should Know:**
-This is an automated decision-support reading designed to assist doctors. It means that the computer noticed image patterns worth double-checking, but your doctor will always examine your complete health history, symptoms, and the actual images before making any final diagnosis.
-
-**Technical Findings Summary:**
-{findings_block}"""
+{"It means that the image is worth a closer look by a doctor." if is_pos else "A negative result does not rule anything out."} This tool helps sort scans; a doctor makes the diagnosis using the full picture, including symptoms and history."""
 
     elif is_differential_query:
-        sorted_preds = sorted(preds_list, key=lambda x: float(x.get("probability", 0.0)), reverse=True)
-        ranked_lines = [
-            f"{idx + 1}. **{p.get('pathology', 'Unknown')}**: {float(p.get('probability', 0.0)) * 100:.1f}% "
-            f"(Epistemic uncertainty: ±{float(p.get('epistemic_uncertainty', 0.0)):.4f})"
-            for idx, p in enumerate(sorted_preds)
-        ]
-        ranked_block = "\n".join(ranked_lines) if ranked_lines else "No differential available."
+        borderline = [p.get("pathology", "Unknown") for p in ranked if 0.4 <= float(p.get("probability", 0.0)) < 0.6]
+        if borderline:
+            reliability = (
+                f"Least reliable: {', '.join(borderline)} (scores between 0.40 and 0.60). Results this close to the "
+                "threshold can change with cropping, compression or annotations on the image."
+            )
+        else:
+            reliability = (
+                "No finding is in the borderline band (0.40 to 0.60). Scores further from 0.50 are less likely to "
+                "flip, but borders, annotations or cropping on the image can still shift them noticeably."
+            )
+        reply = f"""**How reliable this result is**
 
-        reply = f"""**Differential Diagnosis & Model Calibration Analysis**
+{reliability}
 
-**Ranked Pathology Differential:**
-{ranked_block}
+This model does not report a measured uncertainty, and its threshold was tuned to catch rare findings, so it flags some normal scans as positive. Results on photos, screenshots or annotated images are less reliable than on original DICOM files.
 
-**Calibration & Epistemic Uncertainty Metrics:**
-- **Primary Finding**: **{target_info['pathology']}** at {target_info['probability'] * 100:.1f}%
-- **Epistemic Uncertainty Range**: ±{target_info['epistemic_uncertainty']:.4f}
-- **Spatial Focus**: {resolved_heatmap_text}
-- {telemetry_str if telemetry_str else 'Image pixel dynamics fall within standard thoracic contrast bounds.'}
-
-**Interpretation Guidance:**
-Lower epistemic uncertainty values indicate higher model confidence in feature extraction. Significant overlap between top differential candidates warrants cross-sectional imaging (CT) to resolve competing diagnostic hypotheses."""
+**All findings, highest score first**
+{findings_block}"""
 
     else:
-        # Open-ended question response with prior history awareness
-        history_note = ""
-        if conversation_history:
-            history_note = f"\n*Building upon our previous {len(conversation_history)} conversation turn(s)...*\n"
+        history_note = "Following on from the earlier questions: " if conversation_history else ""
+        summary = (
+            f"above the threshold: {', '.join(positives)}."
+            if positives
+            else "no finding above the threshold."
+        )
+        reply = f"""**Summary of this scan**
 
-        reply = f"""**Clinical Correlation & Findings Analysis**
-{history_note}
-**Response to Inquiry (*"{user_message}"*):**
-The AI triage model evaluated the thoracic radiograph with specific focus on **{target_info['pathology']}** ({target_info['probability'] * 100:.1f}% calibrated probability, {target_info['triage_urgency']} triage urgency, epistemic uncertainty ±{target_info['epistemic_uncertainty']:.4f}).
+{history_note}The model scored this scan for five findings and placed it in the **{urgency_word}** priority group, with {summary}
 
-**Spatial Saliency & Image Telemetry:**
-- **Localization**: {resolved_heatmap_text}
-- {telemetry_str if telemetry_str else 'Thoracic density metrics reflect standard calibrated ranges.'}
-
-**Multi-Label Classifier Findings:**
+**All findings, highest score first**
 {findings_block}
 
-**Clinical Recommendation:**
-Correlate these quantitative metrics and anatomical focal points with the patient's acute symptoms, physical exam, and prior thoracic imaging."""
+{threshold_note} You can ask about a specific finding, the heatmap, next steps, or how reliable the result is."""
 
     return reply
 
@@ -908,7 +865,7 @@ class ScanChatService:
             preds_list = []
 
         grounded_findings = [
-            f"{p.get('pathology', 'Unknown')}: {float(p.get('probability', 0.0)) * 100:.1f}%"
+            f"{p.get('pathology', 'Unknown')}: {format_score(p)}"
             for p in preds_list
         ]
 

@@ -78,7 +78,9 @@ def test_grounded_system_prompt_contains_only_model_metrics_and_disclaimer():
         target_pathology="Pneumonia",
     )
     assert "Pneumonia" in prompt
-    assert "72.0%" in prompt
+    assert "score 0.72 (POSITIVE; 0.50 = model threshold)" in prompt
+    assert "not calibrated probabilities" in prompt
+    assert "72.0%" not in prompt
     assert "diagnosis" in prompt.lower()
 
 
@@ -389,7 +391,8 @@ def test_chat_service_upstream_http_error_falls_back_to_offline(monkeypatch):
     # Gracefully falls back to deterministic local reply
     assert reply["provider_used"] == "grounded-local-fallback"
     assert "Pneumothorax" in reply["answer"]
-    assert "92.0%" in reply["answer"]
+    assert "score 0.92" in reply["answer"]
+    assert "92.0%" not in reply["answer"]
     assert reply["zero_pii_verified"] is True
 
 
@@ -897,8 +900,8 @@ def test_synthesize_offline_grounded_reply_infection_routes_to_pathology():
         target_pathology="Pneumonia",
     )
     # Must route to pathology assessment, NOT clinical next steps
-    assert "Targeted Pathology Assessment: Pneumonia" in reply
-    assert "Recommended Clinical Next Steps" not in reply
+    assert "**Pneumonia: " in reply
+    assert "Suggested next steps" not in reply
     assert "Pneumonia" in reply
 
 
@@ -912,8 +915,8 @@ def test_synthesize_offline_grounded_reply_ordered_does_not_trigger_heatmap():
         target_pathology="Pneumonia",
     )
     # "ordered" must not trigger "red" substring matching in heatmap mode
-    assert "Visual Explainability & Spatial Saliency Analysis" not in reply
-    assert "Recommended Clinical Next Steps & Diagnostic Workup" in reply
+    assert "Where the heatmap is focused" not in reply
+    assert "Suggested next steps" in reply
 
 
 def test_synthesize_offline_grounded_reply_elevated_urgency_guidance():
@@ -925,8 +928,8 @@ def test_synthesize_offline_grounded_reply_elevated_urgency_guidance():
         predictions=predictions,
         target_pathology="Pneumothorax",
     )
-    assert "Recommended Clinical Next Steps & Diagnostic Workup" in reply
-    assert "ELEVATED" in reply
+    assert "Suggested next steps" in reply
+    assert "priority: **elevated**" in reply.lower()
     assert "elective" not in reply.lower()
     assert any(term in reply.lower() for term in ["expedited", "elevated"])
 
@@ -957,7 +960,7 @@ def test_chat_service_auto_provider_clean_fallback_from_unset_keys(monkeypatch, 
         conversation_history=[],
     ))
     assert reply["provider_used"] == "grounded-local-fallback"
-    assert "Recommended Clinical Next Steps" in reply["answer"]
+    assert "Suggested next steps" in reply["answer"]
     assert reply["zero_pii_verified"] is True
     assert reply["medical_disclaimer"]
 
@@ -980,3 +983,36 @@ def test_extract_scan_telemetry_signed_pixel_representation():
 
 
 
+
+
+def test_offline_reply_never_presents_scores_as_percent_chance_and_respects_negative_result():
+    from medshield.ml.chat_service import synthesize_offline_grounded_reply
+    preds = [
+        {"pathology": "Pneumonia", "probability": 0.3438, "is_positive": False, "triage_urgency": "ROUTINE"},
+        {"pathology": "Cardiomegaly", "probability": 0.0043, "is_positive": False, "triage_urgency": "ROUTINE"},
+    ]
+    for question in ("Explain this in simple terms", "Is there pneumonia?", "How confident is the model?", "What next?"):
+        answer = synthesize_offline_grounded_reply(
+            user_message=question, predictions=preds, target_pathology="Pneumonia",
+        )
+        assert "34.4%" not in answer and "calibrated probability" not in answer, question
+        assert "0.34" in answer and "negative" in answer.lower(), question
+        # A negative result must not be described as showing hazy/cloudy patches
+        assert "scan shows cloudier" not in answer, question
+
+
+@pytest.mark.parametrize("question", [
+    "How reliable is this result?",
+    "Is this accurate?",
+    "Can I trust this?",
+    "How confident is the model?",
+])
+def test_reliability_questions_route_to_reliability_answer(question):
+    from medshield.ml.chat_service import synthesize_offline_grounded_reply
+    preds = [
+        {"pathology": "Pneumonia", "probability": 0.52, "triage_urgency": "ELEVATED"},
+        {"pathology": "Atelectasis", "probability": 0.09, "triage_urgency": "ROUTINE"},
+    ]
+    answer = synthesize_offline_grounded_reply(user_message=question, predictions=preds, target_pathology="Pneumonia")
+    assert "How reliable this result is" in answer
+    assert "Least reliable: Pneumonia" in answer   # 0.52 is within the 0.40-0.60 borderline band
