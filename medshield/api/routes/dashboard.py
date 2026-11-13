@@ -3,7 +3,9 @@ from datetime import datetime, timezone
 import hashlib
 import io
 import os
-from typing import Any, Dict, List, Literal, Optional
+from collections import OrderedDict
+import threading
+from typing import Any, Dict, List, Literal, Optional, Tuple
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.concurrency import run_in_threadpool
@@ -25,6 +27,7 @@ from medshield.verification.compliance_scanner import ComplianceScanner
 from medshield.verification.entropy_analyzer import calculate_shannon_entropy
 from medshield.api.routes.inference import _shared_engine
 from medshield.ml.chat_service import ScanChatService
+from medshield.ml.offline_assistant import detect_topics, is_heatmap_question
 from medshield.utils.dicom_helpers import extract_pixel_array, write_pixel_array_to_dataset
 
 router = APIRouter(tags=["Clinical Dashboard"])
@@ -37,6 +40,27 @@ _dashboard_store: Dict[str, EncryptedStore] = {}
 _dashboard_engine = _shared_engine
 _dashboard_worklist: Dict[str, Dict[str, Any]] = {}
 _dashboard_session_cache: Dict[str, Dict[str, Any]] = {}
+
+# Scan-chat cache: (scan_id, ciphertext sha256) -> {"predictions": [...], "heatmaps": {pathology: PIL image}}
+_CHAT_CACHE_MAX = 32
+_chat_cache: "OrderedDict[Tuple[str, str], Dict[str, Any]]" = OrderedDict()
+_chat_cache_lock = threading.Lock()
+
+
+def _chat_cache_get(key: Tuple[str, str]) -> Optional[Dict[str, Any]]:
+    with _chat_cache_lock:
+        entry = _chat_cache.get(key)
+        if entry is not None:
+            _chat_cache.move_to_end(key)
+        return entry
+
+
+def _chat_cache_put(key: Tuple[str, str], entry: Dict[str, Any]) -> None:
+    with _chat_cache_lock:
+        _chat_cache[key] = entry
+        _chat_cache.move_to_end(key)
+        while len(_chat_cache) > _CHAT_CACHE_MAX:
+            _chat_cache.popitem(last=False)
 
 def _decrypt_study_or_http_error(encrypted_container: bytes) -> bytes:
     """Decrypts a study envelope, mapping each failure mode to a distinct HTTP error."""
@@ -504,6 +528,10 @@ def demo_crypto_shredding(study_uid: str, settings: Settings = Depends(get_setti
     if study_uid in _dashboard_worklist:
         _dashboard_worklist[study_uid]["is_shredded"] = True
     _dashboard_session_cache.pop(study_uid, None)
+    # Erasure also drops cached chat results; cached heatmaps are rendered over the patient's image
+    with _chat_cache_lock:
+        for key in [k for k in _chat_cache if k[0] == study_uid]:
+            del _chat_cache[key]
     
     # Verify Decryption Fails
     verification_failed = False
@@ -543,6 +571,7 @@ class ScanChatResponse(BaseModel):
     scan_id: str
     provider_used: str
     answer: str
+    suggested_questions: List[str] = Field(default_factory=list)
     grounded_findings: List[str]
     zero_pii_verified: bool
     pii_redacted_from_prompt: bool
@@ -571,18 +600,26 @@ async def scan_chat_endpoint(
             raise HTTPException(status_code=404, detail=f"Scan '{req.scan_id}' not found in encrypted storage")
 
         enc_blob = store.load(req.scan_id)
+        # Always decrypt: a shredded or unreadable study must fail here even if results are cached
         decrypted_bytes = _decrypt_study_or_http_error(enc_blob)
 
         cleaned_ds = pydicom.dcmread(io.BytesIO(decrypted_bytes), force=True)
 
-        # In-memory inference using _dashboard_engine
-        pred_result = _dashboard_engine.predict(cleaned_ds)
-        predictions_list = pred_result.get("predictions", [])
+        # Model scores and heatmaps are cached per exact ciphertext, so follow-up questions
+        # don't re-run the CNN; a re-ingested study has a different ciphertext and a fresh entry.
+        cache_key = (req.scan_id, hashlib.sha256(enc_blob).hexdigest())
+        cached = _chat_cache_get(cache_key)
+        if cached is None:
+            cached = {"predictions": _dashboard_engine.predict(cleaned_ds).get("predictions", []), "heatmaps": {}}
+            _chat_cache_put(cache_key, cached)
+        predictions_list = cached["predictions"]
 
         # Resolve target_pathology by matching req.target_pathology against
         # [p["pathology"] for p in pred_result["predictions"]], defaulting to highest-probability item if absent/unmatched
         valid_pathologies = [p.get("pathology") for p in predictions_list if "pathology" in p]
-        target_pathology = req.target_pathology
+        # A question about exactly one finding ("where does it see atelectasis?") targets that finding
+        asked_findings = detect_topics(req.user_message)["findings"]
+        target_pathology = asked_findings[0] if len(asked_findings) == 1 else req.target_pathology
         if not target_pathology or target_pathology not in valid_pathologies:
             if predictions_list:
                 highest_pred = max(predictions_list, key=lambda x: float(x.get("probability", 0.0)))
@@ -592,12 +629,14 @@ async def scan_chat_endpoint(
 
         # Heatmap generation if requested or if user asks about heatmap localization
         heatmap_pil = None
-        user_spatial_query = any(k in req.user_message.lower() for k in ("heatmap", "highlight", "where", "zone", "region", "focus", "saliency", "grad-cam", "gradcam"))
-        if req.include_heatmap_overlay or user_spatial_query:
-            try:
-                heatmap_pil = _dashboard_engine.generate_heatmap_image(cleaned_ds, target_pathology)
-            except Exception:
-                heatmap_pil = None
+        if req.include_heatmap_overlay or is_heatmap_question(req.user_message):
+            heatmap_pil = cached["heatmaps"].get(target_pathology)
+            if heatmap_pil is None:
+                try:
+                    heatmap_pil = _dashboard_engine.generate_heatmap_image(cleaned_ds, target_pathology)
+                    cached["heatmaps"][target_pathology] = heatmap_pil
+                except Exception:
+                    heatmap_pil = None
         return cleaned_ds, predictions_list, target_pathology, heatmap_pil
 
     cleaned_ds, predictions_list, target_pathology, heatmap_pil = await run_in_threadpool(_prepare_scan_context)
@@ -623,6 +662,7 @@ async def scan_chat_endpoint(
         scan_id=req.scan_id,
         provider_used=reply["provider_used"],
         answer=reply["answer"],
+        suggested_questions=reply.get("suggested_questions", []),
         grounded_findings=reply["grounded_findings"],
         zero_pii_verified=reply["zero_pii_verified"],
         pii_redacted_from_prompt=reply["pii_redacted_from_prompt"],
