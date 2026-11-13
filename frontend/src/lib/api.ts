@@ -75,14 +75,24 @@ function describeErrorBody(body: unknown): string {
   return ''
 }
 
+const UNREACHABLE_MESSAGE = "Couldn't reach the MedShield server. Check that the backend is running, then try again."
+
 async function safeApiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(resolveApiUrl(path), init)
+  let res: Response
+  try {
+    res = await fetch(resolveApiUrl(path), init)
+  } catch {
+    // Network failure (server down, offline, blocked by CORS)
+    throw new ApiError(UNREACHABLE_MESSAGE, 0)
+  }
   const raw = await res.text()
 
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
   } catch {
+    // Non-JSON gateway errors come from a proxy in front of a backend that isn't responding
+    if ([502, 503, 504].includes(res.status)) throw new ApiError(UNREACHABLE_MESSAGE, res.status)
     throw new ApiError(raw.trim() || `Server returned HTTP ${res.status}`, res.status)
   }
 

@@ -120,6 +120,12 @@ export interface ScanChatMessage {
   isError?: boolean
   /** Heading for system notices, e.g. 'Study erased' or 'Request failed'. */
   title?: string
+  /** Follow-up questions suggested by the server for this answer. */
+  suggested_questions?: string[]
+  /** True when personal details were removed from the user's question before processing. */
+  pii_redacted?: boolean
+  /** On a failed request: the question to resend when the user clicks Retry. */
+  retryQuestion?: string
 }
 
 export interface ScanChatRequest {
@@ -134,6 +140,7 @@ export interface ScanChatResponse {
   scan_id: string
   provider_used: string
   answer: string
+  suggested_questions?: string[]
   grounded_findings: string[]
   zero_pii_verified: boolean
   pii_redacted_from_prompt: boolean
