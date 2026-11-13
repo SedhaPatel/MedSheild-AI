@@ -46,6 +46,8 @@ export interface WorkstationState {
   changePathologyHeatmap: (pathology: string) => Promise<void>
   cryptoShredActiveStudy: () => Promise<void>
   askScanQuestion: (question: string) => Promise<void>
+  retryScanQuestion: (noticeId: string) => Promise<void>
+  clearScanChat: () => void
 
   setChatOpen: (open: boolean) => void
   setPreviewHeatmap: (value: boolean | ((prev: boolean) => boolean)) => void
@@ -311,6 +313,8 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
         content: resp.answer,
         provider_used: resp.provider_used,
         grounded_findings: resp.grounded_findings,
+        suggested_questions: resp.suggested_questions ?? [],
+        pii_redacted: resp.pii_redacted_from_prompt,
         timestamp: Date.now(),
       }
 
@@ -352,6 +356,7 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
           timestamp: Date.now(),
           isError: true,
           title: 'Request failed',
+          retryQuestion: trimmed,
         }
         set((s) => ({
           chatMessagesByStudy: {
@@ -366,6 +371,28 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
     } finally {
       set({ isChatSending: false })
     }
+  },
+
+  retryScanQuestion: async (noticeId) => {
+    const { activeStudy, chatMessagesByStudy, isChatSending } = get()
+    if (!activeStudy || isChatSending) return
+    const scanId = activeStudy.anonymous_study_instance_uid
+    const messages = chatMessagesByStudy[scanId] ?? []
+    const idx = messages.findIndex((m) => m.id === noticeId)
+    const question = idx >= 0 ? messages[idx].retryQuestion : undefined
+    if (!question) return
+    // Drop the failed question and its error notice, then ask again
+    const failedUserIdx = messages.slice(0, idx).map((m) => m.role).lastIndexOf('user')
+    const kept = messages.filter((_, i) => i !== idx && i !== failedUserIdx)
+    set((s) => ({ chatMessagesByStudy: { ...s.chatMessagesByStudy, [scanId]: kept } }))
+    await get().askScanQuestion(question)
+  },
+
+  clearScanChat: () => {
+    const { activeStudy } = get()
+    if (!activeStudy) return
+    const scanId = activeStudy.anonymous_study_instance_uid
+    set((s) => ({ chatMessagesByStudy: { ...s.chatMessagesByStudy, [scanId]: [] } }))
   },
 
   setChatOpen: (chatOpen) => set({ chatOpen }),

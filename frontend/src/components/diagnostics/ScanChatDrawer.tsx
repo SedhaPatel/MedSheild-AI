@@ -5,7 +5,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react'
-import { AlertCircle, ChevronRight, Loader2, X } from 'lucide-react'
+import { AlertCircle, Check, ChevronRight, Copy, Loader2, RotateCcw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Sheet,
@@ -163,6 +163,9 @@ export function ScanChatDrawer() {
   const activeStudy = useWorkstationStore((s) => s.activeStudy)
   const isShredded = useWorkstationStore(selectIsActiveStudyShredded)
   const askScanQuestion = useWorkstationStore((s) => s.askScanQuestion)
+  const retryScanQuestion = useWorkstationStore((s) => s.retryScanQuestion)
+  const clearScanChat = useWorkstationStore((s) => s.clearScanChat)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
 
   const [inputValue, setInputValue] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -173,6 +176,23 @@ export function ScanChatDrawer() {
   const messages = scanId ? chatMessagesByStudy[scanId] ?? [] : []
 
   const topFinding = activeStudy ? rankPredictions(activeStudy.ai_diagnostics.predictions)[0] : undefined
+
+  // Follow-up chips: the latest answer's own suggestions, or the defaults if there are none
+  const lastMessage = messages[messages.length - 1]
+  const followUps =
+    lastMessage?.role === 'assistant' && lastMessage.suggested_questions?.length
+      ? lastMessage.suggested_questions
+      : QUICK_QUESTIONS
+
+  const copyAnswer = (id: string, content: string) => {
+    void navigator.clipboard
+      .writeText(content.replace(/\*\*/g, ''))
+      .then(() => {
+        setCopiedId(id)
+        setTimeout(() => setCopiedId((current) => (current === id ? null : current)), 1500)
+      })
+      .catch(() => undefined)
+  }
 
   useEffect(() => {
     if (!chatOpen) return
@@ -226,6 +246,18 @@ export function ScanChatDrawer() {
         <SheetHeader className="flex flex-col gap-1 border-b border-border-subtle bg-bg-panel px-4 py-3">
           <div className="flex items-center justify-between gap-2">
             <SheetTitle>Ask about this scan</SheetTitle>
+            <div className="flex items-center gap-1">
+              {messages.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={isChatSending}
+                  onClick={clearScanChat}
+                  className="text-text-muted hover:text-text-primary"
+                >
+                  Clear
+                </Button>
+              )}
             <Button
               variant="ghost"
               size="icon"
@@ -235,6 +267,7 @@ export function ScanChatDrawer() {
             >
               <X className="h-4 w-4" />
             </Button>
+            </div>
           </div>
 
           <SheetDescription id="scan-chat-drawer-desc" className="sr-only">
@@ -311,14 +344,33 @@ export function ScanChatDrawer() {
                       ref={isLatest ? latestMessageRef : undefined}
                       className="mr-auto max-w-full space-y-2 text-[13px] leading-relaxed text-text-primary"
                     >
+                      {message.pii_redacted && (
+                        <p className="text-xs text-text-muted">
+                          Personal details in your question were removed before it was processed.
+                        </p>
+                      )}
                       <FormattedMessage content={message.content} />
 
-                      <p className="border-t border-border-subtle pt-1.5 text-xs text-text-muted">
-                        {message.provider_used === 'grounded-local-fallback'
-                          ? 'Built-in summary (no external model)'
-                          : `Model: ${message.provider_used ?? 'unknown'}`}{' '}
-                        &middot; {formatTimestamp(message.timestamp)}
-                      </p>
+                      <div className="flex items-center justify-between gap-2 border-t border-border-subtle pt-1.5 text-xs text-text-muted">
+                        <span>
+                          {message.provider_used === 'grounded-local-fallback'
+                            ? 'Built-in assistant (no external model)'
+                            : `Model: ${message.provider_used ?? 'unknown'}`}{' '}
+                          &middot; {formatTimestamp(message.timestamp)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => copyAnswer(message.id, message.content)}
+                          className="inline-flex cursor-pointer items-center gap-1 rounded-[var(--control-radius)] px-1.5 py-0.5 hover:bg-bg-elevated hover:text-text-primary"
+                          aria-label="Copy answer"
+                        >
+                          {copiedId === message.id ? (
+                            <><Check className="h-3 w-3" aria-hidden="true" /> Copied</>
+                          ) : (
+                            <><Copy className="h-3 w-3" aria-hidden="true" /> Copy</>
+                          )}
+                        </button>
+                      </div>
                     </div>
                   )
                 }
@@ -341,6 +393,20 @@ export function ScanChatDrawer() {
                         {message.title ?? (message.isError ? 'Request failed' : 'Notice')}
                       </p>
                       <p>{message.content}</p>
+                      {message.retryQuestion && (
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          disabled={isChatSending}
+                          onClick={() => {
+                            void retryScanQuestion(message.id)
+                          }}
+                          className="mt-1"
+                        >
+                          <RotateCcw className="h-3 w-3" aria-hidden="true" />
+                          Retry
+                        </Button>
+                      )}
                     </div>
                   </div>
                 )
@@ -358,10 +424,10 @@ export function ScanChatDrawer() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Quick Question Shortcut Strip when thread has messages */}
+        {/* Follow-up suggestions once the conversation has started */}
         {messages.length > 0 && !isShredded && activeStudy && (
           <div className="flex flex-wrap items-center gap-1.5 border-t border-border-subtle bg-bg-panel px-3 py-2">
-            {QUICK_QUESTIONS.map((question) => (
+            {followUps.map((question) => (
               <button
                 key={question}
                 type="button"
