@@ -11,6 +11,7 @@ from medshield.config import Settings
 from medshield.utils.dicom_helpers import extract_pixel_array
 from medshield.utils.logging import get_audit_logger
 from medshield.verification.compliance_scanner import ComplianceScanner
+from medshield.ml.offline_assistant import answer as offline_answer, suggest_follow_ups
 
 logger = get_audit_logger("medshield.ml.chat_service")
 
@@ -338,8 +339,9 @@ Target Pathology Under Review: {target_pathology}
 RESPONSE GUIDELINES:
 1. Ground all diagnostic discussions strictly in the validated model findings and the visual scan provided.
 2. Discuss each finding as positive or negative relative to the model threshold, and the anatomical region highlighting it. Never present a score as a percentage chance or probability. Scores near 0.50 are borderline and should be described as uncertain.
-3. If asked about anomalies outside the model's target pathologies, provide objective observational feedback based solely on the visual radiograph, noting that it is unclassified by the model.
-4. Maintain an objective, disciplined clinical tone.
+3. The tool only reports five findings (pneumonia, cardiomegaly, pleural effusion, pneumothorax, atelectasis). If asked about anything else (e.g. cancer, nodules, tuberculosis, fractures, COVID-19), say plainly that this tool does not assess it and that a radiologist's read is needed; do not guess.
+4. If asked who the patient is or for any personal details, explain that the study is de-identified and no identifiers are available.
+5. Answer in plain, concise language with short paragraphs. Answer only what was asked; do not repeat the full findings list unless it is relevant.
 
 MANDATORY MEDICAL DISCLAIMER:
 This AI clinical assistant provides educational and clinical decision-support assistance only. It is not a standalone diagnostic device and must not replace professional clinical diagnosis or judgment by a licensed radiologist or physician."""
@@ -357,254 +359,19 @@ def synthesize_offline_grounded_reply(
     conversation_history: Optional[List[Dict[str, str]]] = None,
 ) -> str:
     """
-    Question-aware, telemetry-grounded local synthesizer when upstream VLM API credentials
-    are unset or offline. Generates substantively distinct, tailored clinical responses.
+    Built-in answer used when no external model is configured or it fails. See
+    medshield.ml.offline_assistant for topic detection and the answer sections.
+    (scan_telemetry is accepted for API compatibility; raw pixel statistics are not shown to users.)
     """
-    if isinstance(predictions, dict) and "predictions" in predictions:
-        preds_list = predictions["predictions"]
-    elif isinstance(predictions, list):
-        preds_list = predictions
-    else:
-        preds_list = []
-
-    # Map pathologies to dict
-    pred_map: Dict[str, Dict[str, Any]] = {}
-    for p in preds_list:
-        p_name = p.get("pathology", "Unknown")
-        pred_map[p_name.lower()] = {
-            "pathology": p_name,
-            "probability": float(p.get("probability", 0.0)),
-            "is_positive": score_verdict(p) == "POSITIVE",
-            "triage_urgency": p.get("triage_urgency", "ROUTINE")
-        }
-
-    # Identify primary target
-    target_info = pred_map.get(target_pathology.lower())
-    if not target_info:
-        if preds_list:
-            top_p = max(preds_list, key=lambda x: float(x.get("probability", 0.0)))
-            target_info = {
-                "pathology": top_p.get("pathology", target_pathology),
-                "probability": float(top_p.get("probability", 0.0)),
-                "is_positive": score_verdict(top_p) == "POSITIVE",
-                "triage_urgency": top_p.get("triage_urgency", "ROUTINE"),
-            }
-        else:
-            target_info = {
-                "pathology": target_pathology,
-                "probability": 0.0,
-                "is_positive": False,
-                "triage_urgency": "ROUTINE",
-            }
-
-    # Heatmap localization (zone names come from analyze_heatmap_zones)
-    if heatmap_analysis and heatmap_analysis.get("has_heatmap"):
-        peak_zone = heatmap_analysis.get("peak_zone", "")
-        secondary_zone = heatmap_analysis.get("secondary_zone", "")
-        focus_pct = heatmap_analysis.get("focus_percentage", 0.0)
-    elif heatmap_zone_summary:
-        peak_zone, secondary_zone, focus_pct = heatmap_zone_summary, "", 0.0
-    else:
-        peak_zone, secondary_zone, focus_pct = "", "", 0.0
-
-    def verdict_word(p: Dict[str, Any]) -> str:
-        score = float(p.get("probability", 0.0))
-        if 0.4 <= score < 0.6:
-            return "borderline " + ("positive" if score >= 0.5 else "negative")
-        return "positive" if score >= 0.5 else "negative"
-
-    def plain_score(p: Dict[str, Any]) -> str:
-        return f"{verdict_word(p)}, score {float(p.get('probability', 0.0)):.2f}"
-
-    ranked = sorted(preds_list, key=lambda x: float(x.get("probability", 0.0)), reverse=True)
-    findings_block = "\n".join(
-        f"- {p.get('pathology', 'Unknown')}: {plain_score(p)}" for p in ranked
-    ) or "- No model findings available."
-    positives = [p.get("pathology", "Unknown") for p in ranked if float(p.get("probability", 0.0)) >= 0.5]
-    target_name = target_info["pathology"]
-    target_score = float(target_info["probability"])
-    target_urgency = target_info.get("triage_urgency", "ROUTINE")
-    urgency_word = {"STAT_CRITICAL": "STAT", "ELEVATED": "elevated", "ROUTINE": "routine"}.get(target_urgency, "routine")
-    threshold_note = (
-        "Scores run from 0 to 1 and 0.50 is the model's threshold; a score is a yes/no signal, "
-        "not a percentage chance of disease."
+    text, _ = offline_answer(
+        user_message,
+        predictions,
+        target_pathology,
+        heatmap_analysis=heatmap_analysis,
+        heatmap_zone_summary=heatmap_zone_summary,
+        conversation_history=conversation_history,
     )
-
-    q_lower = user_message.lower()
-
-    # Detect specific pathology inquiries with word boundaries
-    queried_pathology = None
-    if re.search(r"\b(?:pneumothorax|tension|air\s*leak|collapsed\s*lung)\b", q_lower):
-        queried_pathology = "Pneumothorax"
-    elif re.search(r"\b(?:pneumonia|consolidation|infiltrate|infection)\b", q_lower):
-        queried_pathology = "Pneumonia"
-    elif re.search(r"\b(?:cardiomegaly|heart|cardiac|enlarged\s*heart)\b", q_lower):
-        queried_pathology = "Cardiomegaly"
-    elif re.search(r"\b(?:effusion|fluid|pleural|costophrenic)\b", q_lower):
-        queried_pathology = "Pleural Effusion"
-    elif re.search(r"\b(?:atelectasis|volume\s*loss)\b", q_lower):
-        queried_pathology = "Atelectasis"
-
-    # Intent routing with word-boundary matching for short/ambiguous tokens
-    is_heatmap_query = bool(re.search(
-        r"\b(?:heatmap|highlights?|where|zones?|regions?|red|spots?|grad-?cam|saliency|localization|focus)\b",
-        q_lower,
-    ))
-    is_steps_query = bool(re.search(
-        r"\b(?:next|steps?|recommend\w*|workup|actions?|ct|follow(?:-up)?|triage|management|protocols?)\b",
-        q_lower,
-    ))
-    is_simple_query = bool(re.search(
-        r"\b(?:simple|plain|layman|patient|everyday|clear|mean(?:s|ing)?|why)\b",
-        q_lower,
-    )) or any(phrase in q_lower for phrase in (
-        "in simple terms", "easy to understand", "means that", "in plain english", "in plain language"
-    )) or ("explain" in q_lower and not is_heatmap_query and not is_steps_query)
-
-    is_differential_query = bool(re.search(
-        r"\b(?:uncertain\w*|sure|compare\w*|differential|normal|other|confiden\w*|reliab\w*|accura\w*|trust\w*|epistemic)\b",
-        q_lower,
-    ))
-
-    if is_heatmap_query:
-        if peak_zone:
-            where = f"For {target_name}, the heatmap is strongest in the {peak_zone}"
-            where += f", with a secondary area in the {secondary_zone}" if secondary_zone else ""
-            where += f". About {focus_pct}% of the image is highlighted." if focus_pct else "."
-        else:
-            where = f"No heatmap was generated for {target_name} with this question. Turn on the heatmap overlay and ask again."
-        reply = f"""**Where the heatmap is focused**
-
-{where}
-
-A heatmap shows which regions most influenced the model's score. It does not outline disease, and one is drawn even when the result is negative. Here the {target_name} result is {plain_score(target_info)}.
-
-**All findings**
-{findings_block}"""
-
-    elif is_steps_query:
-        if target_urgency == "STAT_CRITICAL":
-            steps = [
-                "Have a radiologist review this study promptly; the model placed it in the STAT priority group.",
-                "Correlate with the patient's symptoms and vital signs.",
-                "If the finding is confirmed, follow your local urgent pathway; CT may help where the X-ray is unclear.",
-            ]
-        elif target_urgency == "ELEVATED":
-            steps = [
-                "Arrange an expedited radiologist read; the model placed it in the elevated priority group.",
-                "Correlate with symptoms, examination and any prior imaging.",
-                "Consider a lateral view or follow-up imaging if the finding is uncertain.",
-            ]
-        else:
-            steps = [
-                "Read this study in routine order; no finding was above the model's threshold.",
-                "A negative model result does not rule out disease. Clinical concern should still guide further tests.",
-            ]
-        steps_text = "\n".join(f"{n}. {step}" for n, step in enumerate(steps, 1))
-        reply = f"""**Suggested next steps**
-
-Priority: **{urgency_word}** ({target_name}: {plain_score(target_info)}).
-
-{steps_text}
-
-These are general suggestions based only on the model's priority level, not on this patient's history.
-
-**All findings**
-{findings_block}"""
-
-    elif queried_pathology:
-        p_data = pred_map.get(queried_pathology.lower(), {
-            "pathology": queried_pathology,
-            "probability": 0.0,
-            "is_positive": False,
-            "triage_urgency": "ROUTINE"
-        })
-        p_score = float(p_data["probability"])
-        if p_score >= 0.6:
-            meaning = f"The model found image features it associates with {queried_pathology.lower()}."
-        elif p_score >= 0.4:
-            meaning = (
-                "This is close to the threshold, so treat it as uncertain: small changes to the image, such as "
-                "cropping or compression, can flip a result like this."
-            )
-        else:
-            meaning = f"The model did not find the features it associates with {queried_pathology.lower()}."
-        reply = f"""**{queried_pathology}: {verdict_word(p_data)}**
-
-The model's result for {queried_pathology.lower()} is {plain_score(p_data)}. {meaning}
-
-{threshold_note}
-
-**All findings**
-{findings_block}"""
-
-    elif is_simple_query:
-        is_pos = target_score >= 0.5
-        if target_score >= 0.6:
-            result_sentence = f"The computer model flagged signs it associates with **{target_name.lower()}**."
-        elif target_score >= 0.4:
-            result_sentence = f"The computer model's result for **{target_name.lower()}** is borderline, so it can't call it either way."
-        else:
-            result_sentence = f"The computer model did not find signs of **{target_name.lower()}**."
-
-        if "pneumonia" in target_name.lower():
-            background = ("Healthy lungs look mostly dark on an X-ray because air lets the rays through. "
-                          "Pneumonia tends to show up as cloudy or hazy patches.")
-        elif "cardiomegaly" in target_name.lower():
-            background = "Cardiomegaly means an enlarged heart: the heart shadow looks wider than about half the chest."
-        elif "effusion" in target_name.lower():
-            background = "A pleural effusion is fluid around the lungs, which usually collects at the bottom corners of the chest."
-        elif "pneumothorax" in target_name.lower():
-            background = "A pneumothorax is air between the lung and the chest wall, which can make part of the lung collapse."
-        else:
-            background = f"The model compares the image with patterns it learned for {target_name.lower()}."
-
-        reply = f"""**In plain terms**
-
-{result_sentence} {background}
-
-The number next to it ({float(target_score):.2f}) is not a percentage chance. The model says "yes" above 0.50 and "no" below it.
-
-{"It means that the image is worth a closer look by a doctor." if is_pos else "A negative result does not rule anything out."} This tool helps sort scans; a doctor makes the diagnosis using the full picture, including symptoms and history."""
-
-    elif is_differential_query:
-        borderline = [p.get("pathology", "Unknown") for p in ranked if 0.4 <= float(p.get("probability", 0.0)) < 0.6]
-        if borderline:
-            reliability = (
-                f"Least reliable: {', '.join(borderline)} (scores between 0.40 and 0.60). Results this close to the "
-                "threshold can change with cropping, compression or annotations on the image."
-            )
-        else:
-            reliability = (
-                "No finding is in the borderline band (0.40 to 0.60). Scores further from 0.50 are less likely to "
-                "flip, but borders, annotations or cropping on the image can still shift them noticeably."
-            )
-        reply = f"""**How reliable this result is**
-
-{reliability}
-
-This model does not report a measured uncertainty, and its threshold was tuned to catch rare findings, so it flags some normal scans as positive. Results on photos, screenshots or annotated images are less reliable than on original DICOM files.
-
-**All findings, highest score first**
-{findings_block}"""
-
-    else:
-        history_note = "Following on from the earlier questions: " if conversation_history else ""
-        summary = (
-            f"above the threshold: {', '.join(positives)}."
-            if positives
-            else "no finding above the threshold."
-        )
-        reply = f"""**Summary of this scan**
-
-{history_note}The model scored this scan for five findings and placed it in the **{urgency_word}** priority group, with {summary}
-
-**All findings, highest score first**
-{findings_block}
-
-{threshold_note} You can ask about a specific finding, the heatmap, next steps, or how reliable the result is."""
-
-    return reply
+    return text
 
 
 class ScanChatService:
@@ -971,21 +738,28 @@ class ScanChatService:
                 except Exception as exc:
                     logger.warning("Auto provider Ollama failed: %s; falling back to offline synthesizer", exc)
 
+        # The built-in answer doubles as topic detection for follow-up suggestions on every path
+        offline_text, topic_info = offline_answer(
+            scrubbed_user_message,
+            preds_list,
+            target_pathology,
+            heatmap_analysis=heatmap_analysis,
+            heatmap_zone_summary=heatmap_zone_summary,
+            conversation_history=scrubbed_history,
+        )
         if not answer:
-            answer = synthesize_offline_grounded_reply(
-                user_message=scrubbed_user_message,
-                predictions=preds_list,
-                target_pathology=target_pathology,
-                heatmap_zone_summary=heatmap_zone_summary,
-                scan_telemetry=scan_telemetry,
-                heatmap_analysis=heatmap_analysis,
-                conversation_history=scrubbed_history,
-            )
+            answer = offline_text
             provider_used = "grounded-local-fallback"
+
+        asked_before = [t["content"] for t in scrubbed_history if t.get("role") == "user"] + [scrubbed_user_message]
+        suggested_questions = suggest_follow_ups(
+            topic_info, preds_list, asked_before=asked_before, history=scrubbed_history
+        )
 
         return {
             "provider_used": provider_used,
             "answer": answer,
+            "suggested_questions": suggested_questions,
             "grounded_findings": grounded_findings,
             "zero_pii_verified": True,
             "pii_redacted_from_prompt": pii_redacted_from_prompt,
