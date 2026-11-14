@@ -1,5 +1,6 @@
 import io
 from datetime import datetime, timezone
+from typing import Optional
 import pydicom
 from pydicom.dataset import FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian
@@ -7,6 +8,8 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
 from medshield.config import Settings, get_settings
+from medshield.auth.dependencies import require_clinician, register_study_owner
+from medshield.auth.models import UserPublic
 from medshield.anonymization.metadata import anonymize_dicom_metadata
 from medshield.anonymization.pixel_cleaner import clean_pixel_annotations
 from medshield.crypto.envelope import encrypt_envelope
@@ -115,11 +118,15 @@ def process_and_encrypt_study(
 @router.post("", response_model=IngestionResponse, status_code=status.HTTP_201_CREATED)
 async def upload_study(
     file: UploadFile = File(...),
+    current_user: Optional[UserPublic] = Depends(require_clinician),
     settings: Settings = Depends(get_settings),
 ):
     try:
         contents = await file.read()
-        return process_and_encrypt_study(contents, settings)
+        res = process_and_encrypt_study(contents, settings)
+        if current_user:
+            register_study_owner(res.anonymous_study_instance_uid, current_user.username)
+        return res
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:

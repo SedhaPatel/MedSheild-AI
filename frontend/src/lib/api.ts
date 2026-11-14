@@ -1,9 +1,11 @@
 import type {
+  LoginResponse,
   SampleCase,
   ScanChatRequest,
   ScanChatResponse,
   ShredResponse,
   StudyAnalysisResponse,
+  User,
   WorklistEntry,
 } from '@/types/clinical'
 
@@ -18,6 +20,27 @@ export class ApiError extends Error {
 }
 
 const HAS_URL_SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i
+
+let inMemoryToken: string | null = null
+
+export function getAuthToken(): string | null {
+  if (inMemoryToken) return inMemoryToken
+  if (typeof window !== 'undefined' && window.sessionStorage) {
+    inMemoryToken = window.sessionStorage.getItem('medshield_auth_token')
+  }
+  return inMemoryToken
+}
+
+export function setAuthToken(token: string | null): void {
+  inMemoryToken = token
+  if (typeof window !== 'undefined' && window.sessionStorage) {
+    if (token) {
+      window.sessionStorage.setItem('medshield_auth_token', token)
+    } else {
+      window.sessionStorage.removeItem('medshield_auth_token')
+    }
+  }
+}
 
 /**
  * Returns the configured backend API origin without trailing slashes, or an
@@ -60,7 +83,17 @@ export function resolveAbsoluteApiUrl(path: string): string {
 }
 
 async function safeApiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(resolveApiUrl(path), init)
+  const token = getAuthToken()
+  const headers = new Headers(init?.headers)
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+
+  const res = await fetch(resolveApiUrl(path), {
+    ...init,
+    headers,
+    credentials: init?.credentials ?? 'include',
+  })
   const raw = await res.text()
 
   let parsed: unknown
@@ -76,6 +109,56 @@ async function safeApiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return parsed as T
+}
+
+export async function loginApi(username: string, password: string): Promise<LoginResponse> {
+  const res = await fetch(resolveApiUrl('/api/v1/auth/login'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ username, password }),
+    credentials: 'include',
+  })
+
+  const raw = await res.text()
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new ApiError(raw.trim() || `Login failed with HTTP ${res.status}`, res.status)
+  }
+
+  if (!res.ok) {
+    const errObj = parsed as { detail?: string; message?: string }
+    throw new ApiError(errObj.detail || errObj.message || 'Invalid username or password', res.status)
+  }
+
+  const loginResp = parsed as LoginResponse
+  setAuthToken(loginResp.access_token)
+  return loginResp
+}
+
+export async function fetchCurrentUser(): Promise<User> {
+  return safeApiRequest<User>('/api/v1/auth/me')
+}
+
+export async function logoutApi(): Promise<void> {
+  try {
+    await safeApiRequest<{ message: string }>('/api/v1/auth/logout', {
+      method: 'POST',
+    })
+  } finally {
+    setAuthToken(null)
+  }
+}
+
+export function appendAuthTokenToUrl(urlStr: string): string {
+  const token = getAuthToken()
+  if (!token) return urlStr
+  if (urlStr.includes('token=')) return urlStr
+  const separator = urlStr.includes('?') ? '&' : '?'
+  return `${urlStr}${separator}token=${encodeURIComponent(token)}`
 }
 
 export async function fetchReferenceSamples(): Promise<SampleCase[]> {
@@ -135,7 +218,18 @@ export async function shredStudyKey(studyUid: string): Promise<ShredResponse> {
 
 export function getDicomDownloadUrl(studyUid: string, download = false): string {
   const base = resolveApiUrl(`/api/v1/dashboard/studies/${encodeURIComponent(studyUid)}/dicom`)
-  return download ? `${base}?download=true` : base
+  const url = new URL(base, typeof window !== 'undefined' && window.location?.origin ? window.location.origin : 'http://localhost')
+  if (download) {
+    url.searchParams.set('download', 'true')
+  }
+  const token = getAuthToken()
+  if (token) {
+    url.searchParams.set('token', token)
+  }
+  if (!HAS_URL_SCHEME_RE.test(base)) {
+    return `${url.pathname}${url.search}`
+  }
+  return url.toString()
 }
 
 export async function sendScanChatMessage(

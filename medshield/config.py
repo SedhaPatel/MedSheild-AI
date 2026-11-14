@@ -2,9 +2,13 @@ import json
 import os
 from functools import lru_cache
 from typing import Any, List, Optional
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field, field_validator
 
+load_dotenv()
+
 DEFAULT_SECRET_PEPPER = "MedShieldDefaultMasterSalt2026-StrictSec!"
+DEFAULT_JWT_DEV_SECRET = "MedShieldDevSecretKeyForTestingOnly2026-AtLeast32Chars!"
 
 DEFAULT_CORS_ORIGINS: List[str] = [
     "http://localhost:5173",
@@ -45,6 +49,20 @@ def _parse_cors_origins(raw: Optional[str]) -> List[str]:
     ]
 
 
+def _parse_fingerprints(raw: Optional[str]) -> List[str]:
+    if raw is None or not raw.strip():
+        return []
+    stripped = raw.strip()
+    if stripped.startswith("["):
+        try:
+            parsed = json.loads(stripped)
+            if isinstance(parsed, list):
+                return [str(item).strip().lower() for item in parsed if str(item).strip()]
+        except json.JSONDecodeError:
+            pass
+    return [item.strip().lower() for item in stripped.split(",") if item.strip()]
+
+
 class Settings(BaseModel):
     app_name: str = "MedShield-AI"
     environment: str = Field(default_factory=lambda: os.getenv("MEDSHIELD_ENVIRONMENT", "development"))
@@ -65,15 +83,28 @@ class Settings(BaseModel):
 
     # Network and security settings
     tls_min_version: str = Field(default_factory=lambda: os.getenv("MEDSHIELD_TLS_MIN_VERSION", "TLSv1.3"))
-    require_mtls: bool = Field(default_factory=lambda: _parse_bool_env("MEDSHIELD_REQUIRE_MTLS", True))
+    require_mtls: bool = Field(default_factory=lambda: _parse_bool_env("MEDSHIELD_REQUIRE_MTLS", False))
     allowed_client_cert_fingerprints: List[str] = Field(
-        default_factory=lambda: [
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-            "mock-edge-gateway-cert-fingerprint-valid"
-        ]
+        default_factory=lambda: _parse_fingerprints(os.getenv("MEDSHIELD_ALLOWED_CLIENT_CERT_FINGERPRINTS"))
+    )
+    trusted_proxy_secret: Optional[str] = Field(
+        default_factory=lambda: os.getenv("MEDSHIELD_TRUSTED_PROXY_SECRET", None),
+        description="Shared secret required from edge reverse proxy to forward client cert headers"
     )
     cors_origins: List[str] = Field(
         default_factory=lambda: _parse_cors_origins(os.getenv("MEDSHIELD_CORS_ORIGINS"))
+    )
+
+    # Authentication & JWT settings
+    jwt_secret_key: str = Field(
+        default_factory=lambda: os.getenv("MEDSHIELD_JWT_SECRET_KEY", DEFAULT_JWT_DEV_SECRET),
+        description="Secret key for signing application JWT tokens"
+    )
+    jwt_algorithm: str = Field(
+        default_factory=lambda: os.getenv("MEDSHIELD_JWT_ALGORITHM", "HS256")
+    )
+    jwt_access_token_expire_minutes: int = Field(
+        default_factory=lambda: int(os.getenv("MEDSHIELD_JWT_EXPIRE_MINUTES", "60"))
     )
 
     # Optional unified SPA static hosting settings
@@ -124,10 +155,12 @@ class Settings(BaseModel):
 
     def model_post_init(self, __context) -> None:
         super().model_post_init(__context)
-        # Defense-in-depth: enforce non-default salt in production
+        # Defense-in-depth: enforce non-default salt and JWT secret in production
         if self.environment.lower() == "production":
             if not self.secret_pepper or self.secret_pepper == DEFAULT_SECRET_PEPPER.encode("utf-8"):
                 raise ValueError("MEDSHIELD_SECRET_PEPPER must be explicitly set to a unique secret in production!")
+            if not self.jwt_secret_key or self.jwt_secret_key == DEFAULT_JWT_DEV_SECRET or len(self.jwt_secret_key) < 32:
+                raise ValueError("MEDSHIELD_JWT_SECRET_KEY must be explicitly set to a unique key (>= 32 chars) in production!")
 
 
 @lru_cache()

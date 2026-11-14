@@ -1,9 +1,11 @@
 import io
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 import pydicom
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from medshield.config import Settings, get_settings
+from medshield.auth.dependencies import require_clinician, verify_study_access
+from medshield.auth.models import UserPublic
 from medshield.crypto.envelope import decrypt_envelope
 from medshield.crypto.kms_provider import KMSProvider
 from medshield.storage.encrypted_store import EncryptedStore
@@ -90,8 +92,11 @@ def generate_study_heatmap(
 @router.post("/inference/{study_uid}")
 async def run_inference(
     study_uid: str,
+    current_user: Optional[UserPublic] = Depends(require_clinician),
     settings: Settings = Depends(get_settings)
 ):
+    if current_user:
+        await verify_study_access(study_uid, current_user)
     try:
         return process_study_inference(study_uid, settings)
     except KeyError as ke:
@@ -106,8 +111,11 @@ async def run_inference(
 async def get_heatmap(
     study_uid: str,
     pathology: str,
+    current_user: Optional[UserPublic] = Depends(require_clinician),
     settings: Settings = Depends(get_settings)
 ):
+    if current_user:
+        await verify_study_access(study_uid, current_user)
     try:
         img_bytes = generate_study_heatmap(study_uid, pathology, settings)
         return Response(content=img_bytes, media_type="image/png")

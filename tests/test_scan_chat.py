@@ -11,6 +11,15 @@ from pydicom.uid import ExplicitVRLittleEndian
 from medshield.api.app import create_app
 from medshield.api.routes.dashboard import _dashboard_kms, _dashboard_session_cache
 from medshield.config import Settings, get_settings
+from medshield.auth.security import create_access_token
+
+
+def get_clinician_token(settings: Settings) -> str:
+    return create_access_token({"sub": "dr_sterling", "role": "clinician"}, settings=settings)
+
+
+def get_privacy_token(settings: Settings) -> str:
+    return create_access_token({"sub": "officer_clara", "role": "privacy_officer"}, settings=settings)
 from medshield.ml.chat_service import (
     analyze_heatmap_zones,
     assert_zero_pii_and_extract_image,
@@ -447,12 +456,15 @@ def test_chat_endpoint_rejects_shredded_study_with_410_and_never_leaks_phi(monke
         storage_path=storage_dir,
         secret_pepper=b"test-salt-shred-1",
         require_mtls=True,
+        allowed_client_cert_fingerprints=["edge-cert-thumbprint-1"],
         chat_provider="gemini",
         gemini_api_key="mock-gemini-key",
     )
     app = create_app(settings)
     app.dependency_overrides[get_settings] = lambda: settings
     client = TestClient(app)
+    client.headers["Authorization"] = f"Bearer {get_clinician_token(settings)}"
+    client.headers["X-Client-Cert-SHA256"] = "edge-cert-thumbprint-1"
 
     # 1. Analyze patient_01_pneumonia via /api/v1/dashboard/analyze -> capture anonymous_study_instance_uid
     analyze_resp = client.post(
@@ -526,8 +538,11 @@ def test_chat_endpoint_rejects_shredded_study_with_410_and_never_leaks_phi(monke
     image_parts = [p for p in parts if "inlineData" in p]
     assert len(image_parts) == 2  # scan image + heatmap overlay
 
-    # 5. Call POST /api/v1/dashboard/shred/{uid}
-    shred_resp = client.post(f"/api/v1/dashboard/shred/{uid}")
+    # 5. Call POST /api/v1/dashboard/shred/{uid} with Privacy Officer credentials
+    shred_resp = client.post(
+        f"/api/v1/dashboard/shred/{uid}",
+        headers={"Authorization": f"Bearer {get_privacy_token(settings)}"},
+    )
     assert shred_resp.status_code == 200
     assert shred_resp.json()["status"] == "CRYPTO_SHREDDED"
 
@@ -549,6 +564,7 @@ def test_chat_endpoint_alias_and_404_handling(tmp_path):
     app = create_app(settings)
     app.dependency_overrides[get_settings] = lambda: settings
     client = TestClient(app)
+    client.headers["Authorization"] = f"Bearer {get_clinician_token(settings)}"
 
     # Ingest a study
     analyze_resp = client.post(
@@ -584,12 +600,39 @@ def test_chat_endpoint_alias_and_404_handling(tmp_path):
 
 def test_chat_endpoint_mtls_exemption_and_core_protection(tmp_path):
     storage_dir = str(tmp_path / "enc_studies")
-    settings = Settings(storage_path=storage_dir, secret_pepper=b"test-salt-mtls-3", require_mtls=True)
+    settings = Settings(
+        storage_path=storage_dir,
+        secret_pepper=b"test-salt-mtls-3",
+        require_mtls=True,
+        allowed_client_cert_fingerprints=["edge-cert-thumbprint-2"],
+    )
     app = create_app(settings)
     app.dependency_overrides[get_settings] = lambda: settings
     client = TestClient(app)
 
-    # Ingest study (dashboard endpoint is exempted from mTLS)
+    # 1. Unauthenticated request without JWT fails with 401
+    client.headers["X-Client-Cert-SHA256"] = "edge-cert-thumbprint-2"
+    unauth_analyze = client.post(
+        "/api/v1/dashboard/analyze",
+        data={"sample_id": "patient_01_pneumonia"},
+    )
+    assert unauth_analyze.status_code == 401
+
+    core_resp = client.post("/api/v1/studies")
+    assert core_resp.status_code == 401
+
+    # 2. Unauthenticated request without client cert fails with 401
+    client.headers.pop("X-Client-Cert-SHA256")
+    client.headers["Authorization"] = f"Bearer {get_clinician_token(settings)}"
+    no_cert = client.post(
+        "/api/v1/dashboard/analyze",
+        data={"sample_id": "patient_01_pneumonia"},
+    )
+    assert no_cert.status_code == 401
+    assert "Client certificate required" in no_cert.json()["error"]
+
+    # 3. With BOTH valid mTLS cert AND clinician JWT, analyze and chat succeed
+    client.headers["X-Client-Cert-SHA256"] = "edge-cert-thumbprint-2"
     analyze_resp = client.post(
         "/api/v1/dashboard/analyze",
         data={"sample_id": "patient_01_pneumonia"},
@@ -597,12 +640,6 @@ def test_chat_endpoint_mtls_exemption_and_core_protection(tmp_path):
     assert analyze_resp.status_code == 200
     uid = analyze_resp.json()["anonymous_study_instance_uid"]
 
-    # 1. Core protected routes WITHOUT client cert fail with 401
-    core_resp = client.get("/api/v1/studies")
-    assert core_resp.status_code == 401
-    assert "Client certificate required" in core_resp.json()["error"]
-
-    # 2. POST /api/chat WITHOUT client cert succeeds (exempted)
     chat_resp = client.post(
         "/api/chat",
         json={"scan_id": uid, "user_message": "Evaluate scan"},
@@ -617,6 +654,7 @@ def test_chat_endpoint_target_pathology_and_fallback(tmp_path):
     app = create_app(settings)
     app.dependency_overrides[get_settings] = lambda: settings
     client = TestClient(app)
+    client.headers["Authorization"] = f"Bearer {get_clinician_token(settings)}"
 
     analyze_resp = client.post(
         "/api/v1/dashboard/analyze",
@@ -648,6 +686,7 @@ def test_chat_endpoint_zero_pii_violation_returns_422(monkeypatch, tmp_path):
     app = create_app(settings)
     app.dependency_overrides[get_settings] = lambda: settings
     client = TestClient(app)
+    client.headers["Authorization"] = f"Bearer {get_clinician_token(settings)}"
 
     analyze_resp = client.post(
         "/api/v1/dashboard/analyze",
@@ -712,6 +751,7 @@ def test_local_chat_gives_distinct_answers_per_question(tmp_path):
     app = create_app(settings)
     app.dependency_overrides[get_settings] = lambda: settings
     client = TestClient(app)
+    client.headers["Authorization"] = f"Bearer {get_clinician_token(settings)}"
 
     analyze_resp = client.post(
         "/api/v1/dashboard/analyze",
@@ -767,6 +807,7 @@ def test_local_chat_adapts_across_different_scans(tmp_path):
     app = create_app(settings)
     app.dependency_overrides[get_settings] = lambda: settings
     client = TestClient(app)
+    client.headers["Authorization"] = f"Bearer {get_clinician_token(settings)}"
 
     # Scan 1: patient_01_pneumonia
     resp1 = client.post(
@@ -810,6 +851,7 @@ def test_ollama_local_provider_dispatch_and_fallback(monkeypatch, tmp_path):
     app = create_app(settings)
     app.dependency_overrides[get_settings] = lambda: settings
     client = TestClient(app)
+    client.headers["Authorization"] = f"Bearer {get_clinician_token(settings)}"
 
     analyze_resp = client.post(
         "/api/v1/dashboard/analyze",

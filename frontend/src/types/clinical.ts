@@ -1,6 +1,23 @@
 export type TriageUrgency = 'STAT_CRITICAL' | 'ELEVATED' | 'ROUTINE'
 export type ViewPlaneMode = 'raw' | 'redacted' | 'heatmap'
 export type PACSActiveTool = 'WindowLevel' | 'Pan' | 'Zoom'
+export type UserRole = 'clinician' | 'privacy_officer' | 'admin'
+
+export interface User {
+  username: string
+  email: string
+  full_name: string
+  role: UserRole
+  disabled?: boolean
+  assigned_study_uids?: string[]
+}
+
+export interface LoginResponse {
+  access_token: string
+  token_type: string
+  expires_in_seconds: number
+  user: User
+}
 
 export interface SampleCase {
   id: string

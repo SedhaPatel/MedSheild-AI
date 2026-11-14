@@ -17,11 +17,13 @@ export function CryptoShredDialog() {
   const activeStudy = useWorkstationStore((s) => s.activeStudy)
   const worklist = useWorkstationStore((s) => s.worklist)
   const cryptoShredActiveStudy = useWorkstationStore((s) => s.cryptoShredActiveStudy)
+  const user = useWorkstationStore((s) => s.user)
 
   const activeUid = activeStudy?.anonymous_study_instance_uid ?? null
   const isShredded = Boolean(
     activeUid && worklist.find((w) => w.anonymous_study_instance_uid === activeUid)?.is_shredded
   )
+  const isPrivacyOfficer = user?.role === 'privacy_officer'
 
   return (
     <section
@@ -51,12 +53,18 @@ export function CryptoShredDialog() {
               : 'Study key isolated per UID'}
         </div>
 
+        {!isPrivacyOfficer && (
+          <div className="rounded-[var(--control-radius)] border border-accent-attention-border bg-accent-attention-soft p-2 text-[11px] text-accent-attention">
+            RBAC Notice: Cryptographic shredding requires <strong>Privacy Officer</strong> role. Your role ({user?.role ?? 'guest'}) has read-only audit access.
+          </div>
+        )}
+
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <Button
               variant="destructive"
               className="w-full"
-              disabled={!activeStudy || isShredded}
+              disabled={!activeStudy || isShredded || !isPrivacyOfficer}
             >
               Crypto-Shred Study
             </Button>

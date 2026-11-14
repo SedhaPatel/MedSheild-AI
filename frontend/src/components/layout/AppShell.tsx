@@ -4,10 +4,12 @@ import {
   ClipboardList,
   LayoutDashboard,
   Lock,
+  LogOut,
   Monitor,
   ShieldCheck,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useWorkstationStore } from '@/stores/useWorkstationStore'
 
@@ -21,6 +23,8 @@ const NAV_ITEMS = [
 export function AppShell({ children }: { children: ReactNode }) {
   const activeStudy = useWorkstationStore((s) => s.activeStudy)
   const worklist = useWorkstationStore((s) => s.worklist)
+  const user = useWorkstationStore((s) => s.user)
+  const logout = useWorkstationStore((s) => s.logout)
 
   return (
     <div className="flex min-h-screen flex-col bg-bg-canvas text-[13px] text-text-primary">
@@ -98,6 +102,41 @@ export function AppShell({ children }: { children: ReactNode }) {
               <Badge variant="teal">AES-256-GCM</Badge>
               <Badge variant="verified">PS 3.15 Safe Harbor</Badge>
             </div>
+
+            {user && (
+              <div className="flex items-center gap-2 border-l border-border-subtle pl-2">
+                <div className="hidden sm:flex flex-col text-right leading-tight">
+                  <span className="text-xs font-semibold text-text-primary">
+                    {user.full_name}
+                  </span>
+                  <span className="text-[10px] text-text-muted">
+                    {user.email}
+                  </span>
+                </div>
+                <Badge
+                  variant={
+                    user.role === 'clinician'
+                      ? 'teal'
+                      : user.role === 'privacy_officer'
+                      ? 'attention'
+                      : 'verified'
+                  }
+                  className="uppercase text-[10px]"
+                >
+                  {user.role.replace('_', ' ')}
+                </Badge>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void logout()}
+                  title="Sign out of MedShield-AI"
+                  className="h-7 px-2 text-text-secondary hover:text-accent-critical"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                  <span className="hidden lg:inline text-[11px]">Sign Out</span>
+                </Button>
+              </div>
+            )}
           </div>
         </div>
 
