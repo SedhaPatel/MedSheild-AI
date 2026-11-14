@@ -22,3 +22,4 @@ node_modules/
 frontend/dist/
 frontend/node_modules/
 .worktrees/
+.venv
