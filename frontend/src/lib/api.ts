@@ -186,6 +186,11 @@ export function appendAuthTokenToUrl(urlStr: string): string {
   return `${urlStr}${separator}token=${encodeURIComponent(token)}`
 }
 
+/** Public: whether the server allows the built-in demo accounts (shown on the login page only then). */
+export async function fetchAuthOptions(): Promise<{ demo_accounts_enabled: boolean }> {
+  return safeApiRequest<{ demo_accounts_enabled: boolean }>('/api/v1/auth/options')
+}
+
 export async function fetchReferenceSamples(): Promise<SampleCase[]> {
   const data = await safeApiRequest<{ samples: SampleCase[] }>('/api/v1/dashboard/samples')
   return data.samples
