@@ -48,3 +48,6 @@ PLAN.md
 FRONTEND_SPEC.md
 DEPLOYMENT.md
 verify_e2e_pipeline.py
+
+# Local key store (never bake keys into images)
+.kms

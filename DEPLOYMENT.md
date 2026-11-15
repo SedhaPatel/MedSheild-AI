@@ -4,6 +4,58 @@ This guide explains **where and how to deploy the MedShield-AI backend and front
 
 ---
 
+## Quick start: Hugging Face Spaces (free, single container)
+
+A Docker Space runs the whole app (UI + API) from the [`Dockerfile`](Dockerfile) on one URL. The free CPU
+hardware has enough memory for the PyTorch model. Uploaded studies are kept only while the container runs:
+they are lost when the Space restarts or goes to sleep after inactivity, which is fine for a demo.
+
+**One-time setup on your machine**
+
+```bash
+pip install huggingface_hub          # Hugging Face client (not needed by the app itself)
+hf auth login                        # paste a token from https://huggingface.co/settings/tokens with "Write" access
+```
+
+**1. Create the private settings file** (random secrets are generated for you; the file is git-ignored):
+
+```bash
+python scripts/deploy_hf_space.py --init-secrets     # writes deploy/huggingface/space-secrets.env
+```
+
+**2. Choose how people sign in**
+
+- *Real accounts (recommended):* create one per person; passwords are typed (hidden) and stored only as bcrypt hashes in `users.json` (git-ignored):
+
+  ```bash
+  python scripts/create_user.py --username dr_patel --role clinician --full-name "Dr. A. Patel" --email a.patel@example.org
+  python scripts/create_user.py --username privacy_lead --role privacy_officer --full-name "Privacy Lead" --email privacy@example.org
+  ```
+
+  Roles: `clinician` (upload and read own studies), `privacy_officer` (audit and erase), `admin` (everything).
+- *Demo accounts only:* set `MEDSHIELD_ENABLE_DEMO_USERS=true` in the settings file. The demo passwords are published in the code, so anyone could sign in, including as admin.
+
+**3. Deploy** (creates the Space if needed, stores the secrets, uploads the committed code):
+
+```bash
+python scripts/deploy_hf_space.py <your-hf-username>/medshield --users-file users.json
+```
+
+Hugging Face then builds the image (about 10-15 minutes the first time). Follow the build log on the Space
+page; when it shows *Running*, open the app and sign in. To ship a new version, commit your changes and run
+the same deploy command again (add `--skip-settings` to leave the secrets untouched).
+
+**Troubleshooting**
+
+| Symptom | Cause / fix |
+| :--- | :--- |
+| Build log: `MEDSHIELD_SECRET_PEPPER must be explicitly set` or `MEDSHIELD_JWT_SECRET_KEY must be explicitly set` | Secrets missing: rerun the deploy without `--skip-settings`, or add them under Space **Settings → Variables and secrets**. |
+| Login page shows no demo accounts and nobody can sign in | No accounts configured: deploy with `--users-file users.json`, or set `MEDSHIELD_ENABLE_DEMO_USERS=true`. The container log says `No user accounts are configured`. |
+| Studies disappeared | The Space restarted or slept; free Spaces have no persistent disk. |
+| Build fails at `model weights ready` | The image could not download the pre-trained model (network); restart the build. |
+
+---
+
 ## 1. Observed Tech Stack & Runtime Footprint
 
 ### Backend (`medshield/`)
@@ -153,6 +205,10 @@ In [`medshield/api/middleware/mtls_auth.py`](medshield/api/middleware/mtls_auth.
 | `MEDSHIELD_STORAGE_PATH` | `./storage/encrypted_studies` (`/app/storage/encrypted_studies` in Docker) | Recommended | Directory for AES-256-GCM `MEDENC01` `.enc` study files |
 | `MEDSHIELD_SERVE_FRONTEND` | `false` | Set `true` only for unified container | Serves built Vite SPA (`frontend/dist`) from FastAPI |
 | `MEDSHIELD_FRONTEND_DIST_DIR` | `./frontend/dist` (`/app/frontend/dist` in Docker) | Only when unified | Path to built Vite production bundle |
+| `MEDSHIELD_JWT_SECRET_KEY` | Dev placeholder | **Yes (>= 32 chars)** | Signs login tokens; the app refuses to start in production without a unique value |
+| `MEDSHIELD_USERS_JSON` | *(empty)* | Yes, unless demo accounts are on | Sign-in accounts (JSON list with bcrypt hashes), created with `scripts/create_user.py` |
+| `MEDSHIELD_ENABLE_DEMO_USERS` | `true` in development, `false` in production | Optional | Enables the built-in demo accounts, whose passwords are published |
+| `MEDSHIELD_JWT_EXPIRE_MINUTES` | `60` | Optional | Session length |
 | `MEDSHIELD_KMS_MASTER_KEY_ID` | `arn:medshield:kms:local:key/master-kek-v1` | Optional | Base Master KEK identifier |
 | `MEDSHIELD_KMS_KEYSTORE_PATH` | *(empty: in-memory)* | Optional | Persist local KMS keys to a 0600 JSON file so studies survive restarts. Dev only: keep off the storage volume; use a real KMS/HSM in production |
 | `MEDSHIELD_MODEL_ARCHITECTURE` | `torchxrayvision` | Optional | `torchxrayvision` (pre-trained DenseNet-121) or `efficientnet_v2_s` (untrained; requires `MEDSHIELD_MODEL_CHECKPOINT_PATH`) |
