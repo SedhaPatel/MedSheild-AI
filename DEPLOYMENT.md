@@ -4,11 +4,71 @@ This guide explains **where and how to deploy the MedShield-AI backend and front
 
 ---
 
-## Quick start: Hugging Face Spaces (free, single container)
+## Quick start: Render (free plan, single container)
 
-A Docker Space runs the whole app (UI + API) from the [`Dockerfile`](Dockerfile) on one URL. The free CPU
-hardware has enough memory for the PyTorch model. Uploaded studies are kept only while the container runs:
-they are lost when the Space restarts or goes to sleep after inactivity, which is fine for a demo.
+One Docker web service runs the whole app (UI + API) from the [`Dockerfile`](Dockerfile) on one URL.
+
+**What the free plan means for this app**
+
+- 512 MB RAM and 0.1 CPU. The app normally peaks at ~800 MB with a full-size X-ray, so the free setup
+  turns on **low-memory mode**: uploads are shrunk to at most 1024 px per side (the model only uses
+  224 x 224) and the allocator is tuned. Measured peak: ~475 MB with a 3000 x 3000 DICOM.
+- It sleeps after 15 idle minutes; the next visit takes about a minute to wake. A scan takes ~5-20 s.
+- Nothing persists: studies and their keys are lost on every restart, sleep or deploy. Demo use only, no
+  real patient data.
+- One upload at a time is safe; several large uploads at the same moment can exceed 512 MB and restart it.
+
+**1. Prepare the settings on your machine** (accounts are hashed with bcrypt; files are git-ignored):
+
+```bash
+python scripts/create_user.py --username dr_patel --role admin --full-name "Dr. A. Patel" --email a.patel@example.org
+python scripts/render_env.py --users-file users.json     # prints what to paste in step 3
+```
+
+**2. Create the service** at [dashboard.render.com](https://dashboard.render.com): **New > Web Service**, open
+the **Public Git Repository** tab, enter `https://github.com/SedhaPatel/MedSheild-AI` and click **Connect**. Then:
+
+| Field | Value |
+| :--- | :--- |
+| Name | `medshield` (becomes `https://medshield-xxxx.onrender.com`) |
+| Language | Docker |
+| Branch | `master` |
+| Region | Singapore (closest to India) |
+| Instance Type | Free |
+| Advanced > Health Check Path | `/health` |
+
+**3. Environment variables** (same page): click **Add from .env** and paste block 1 from `render_env.py`.
+Then add `MEDSHIELD_USERS_JSON` as a separate variable with the one-line JSON from block 2. It contains `$`
+characters, which the .env import would mangle.
+
+**4. Click Create Web Service.** The first build takes about 10-20 minutes; follow it under **Logs**. When the
+log shows `Uvicorn running`, open the URL and sign in.
+
+**Updating:** services created from a public URL don't auto-deploy. After changes are pushed to `master`,
+click **Manual Deploy > Deploy latest commit**.
+
+*Alternative, Blueprint:* if the repository is connected to your Render account (the repo owner installs
+Render's GitHub app, or you deploy your own fork), use **New > Blueprint**. [`render.yaml`](render.yaml) sets
+everything above, generates the secrets, auto-deploys on every push, and asks only for `MEDSHIELD_USERS_JSON`.
+
+**Troubleshooting (Render)**
+
+| Symptom | Cause / fix |
+| :--- | :--- |
+| `MEDSHIELD_SECRET_PEPPER must be explicitly set` / `MEDSHIELD_JWT_SECRET_KEY must be explicitly set` | Block 1 wasn't added: paste it under **Environment** and redeploy. |
+| Event: *Ran out of memory (used over 512MB)* | Check `MEDSHIELD_MAX_IMAGE_DIM=1024` and the other low-memory variables are set. If it still happens, use a 2 GB plan (Standard) and run `render_env.py --full-resolution`. |
+| Nobody can sign in, login page shows no demo accounts | `MEDSHIELD_USERS_JSON` is missing or not valid JSON; the log says `No user accounts are configured`. |
+| First page load takes about a minute | The free service was asleep; this is normal. |
+| Studies disappeared | The service restarted, slept or redeployed; the free plan has no persistent disk. |
+
+---
+
+## Quick start: Hugging Face Spaces (paid: requires a PRO subscription)
+
+Hugging Face now requires PRO for Docker Spaces, even on the basic CPU hardware (otherwise creating the
+Space fails with `402 Payment Required`). A Docker Space runs the whole app (UI + API) from the
+[`Dockerfile`](Dockerfile) on one URL, with enough memory for full-resolution images. Uploaded studies are
+kept only while the container runs: they are lost when the Space restarts or sleeps.
 
 **One-time setup on your machine**
 
@@ -98,7 +158,7 @@ The repository ships a two-stage [`Dockerfile`](Dockerfile) (`python:3.11-slim` 
   - Select a service tier with at least **2–4 GB RAM**.
   - Attach a Railway Volume at `/app/storage/encrypted_studies` (and optionally `/app/weights` to cache downloaded model weights across deploys).
 - **Render ([`render.yaml`](render.yaml)):**
-  - Pre-configured for `runtime: docker`, `plan: standard` (>= 2 GB RAM), `healthCheckPath: /health`, auto-generated `MEDSHIELD_SECRET_PEPPER`, and a 5 GB persistent disk mounted at `/app/storage/encrypted_studies`.
+  - Defaults to the free plan in single-container mode with low-memory settings (see *Quick start: Render* above). The file's header comments explain switching to `plan: standard` (2 GB RAM) with a persistent disk and `MEDSHIELD_KMS_KEYSTORE_PATH`, so studies survive restarts.
 - **Fly.io / Cloud Run (`min-instances=1`) / Self-Hosted VM:**
   - Build from [`Dockerfile`](Dockerfile), expose `$PORT` (default `8000`), probe `GET /health`, allocate **>= 2–4 GB RAM**, and set `min-instances=1` (keep-warm stateful process; note Cloud Run containers have ephemeral local storage across restarts unless backed by a mounted volume/GCS FUSE).
 
@@ -208,6 +268,7 @@ In [`medshield/api/middleware/mtls_auth.py`](medshield/api/middleware/mtls_auth.
 | `MEDSHIELD_JWT_SECRET_KEY` | Dev placeholder | **Yes (>= 32 chars)** | Signs login tokens; the app refuses to start in production without a unique value |
 | `MEDSHIELD_USERS_JSON` | *(empty)* | Yes, unless demo accounts are on | Sign-in accounts (JSON list with bcrypt hashes), created with `scripts/create_user.py` |
 | `MEDSHIELD_ENABLE_DEMO_USERS` | `true` in development, `false` in production | Optional | Enables the built-in demo accounts, whose passwords are published |
+| `MEDSHIELD_MAX_IMAGE_DIM` | `0` (full resolution) | Optional | Low-memory mode: shrink uploads so neither side exceeds this many pixels (`1024` fits a 512 MB server) |
 | `MEDSHIELD_JWT_EXPIRE_MINUTES` | `60` | Optional | Session length |
 | `MEDSHIELD_KMS_MASTER_KEY_ID` | `arn:medshield:kms:local:key/master-kek-v1` | Optional | Base Master KEK identifier |
 | `MEDSHIELD_KMS_KEYSTORE_PATH` | *(empty: in-memory)* | Optional | Persist local KMS keys to a 0600 JSON file so studies survive restarts. Dev only: keep off the storage volume; use a real KMS/HSM in production |

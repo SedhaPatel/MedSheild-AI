@@ -1,6 +1,5 @@
 import io
 from typing import Any, Dict, Optional
-import pydicom
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from medshield.config import Settings, get_settings
@@ -12,6 +11,7 @@ from medshield.storage.encrypted_store import EncryptedStore
 from medshield.ml.inference_engine import InferenceEngine
 from medshield.ml.model import build_thoracic_model
 from medshield.utils.logging import get_audit_logger
+from medshield.utils.dicom_helpers import read_dicom_bytes
 
 router = APIRouter(prefix="/api/v1", tags=["Inference & Diagnostics"])
 audit_logger = get_audit_logger("medshield.audit.inference")
@@ -56,7 +56,7 @@ def process_study_inference(
         audit_logger.error(f"Decryption failed for study {study_uid}: {str(e)}")
         raise PermissionError(f"Cryptographic decryption failed or key revoked: {str(e)}")
         
-    ds = pydicom.dcmread(io.BytesIO(plaintext_bytes), force=True)
+    ds = read_dicom_bytes(plaintext_bytes)
     result = engine.predict(ds)
     
     audit_logger.info(
@@ -93,7 +93,7 @@ def generate_study_heatmap(
         raise KeyError(f"Study with UID '{study_uid}' not found")
         
     plaintext_bytes = decrypt_envelope(encrypted_bytes, kms)
-    ds = pydicom.dcmread(io.BytesIO(plaintext_bytes), force=True)
+    ds = read_dicom_bytes(plaintext_bytes)
     
     heatmap_pil = engine.generate_heatmap_image(ds, pathology)
     bio = io.BytesIO()
