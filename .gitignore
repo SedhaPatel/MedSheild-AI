@@ -24,3 +24,8 @@ frontend/dist/
 frontend/node_modules/
 .worktrees/
 .venv
+# Local account file from scripts/create_user.py (contains password hashes)
+users.json
+
+# Private Hugging Face Space settings (secrets)
+deploy/huggingface/*.env
