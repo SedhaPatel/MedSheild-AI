@@ -47,10 +47,11 @@ def create_raw_dicom_bytes(with_burned_text: bool = False) -> bytes:
     return bio.getvalue()
 
 def test_mtls_fingerprint_validation(tmp_path):
-    """Exercises the real MTLSAuthMiddleware through the ASGI app."""
+    """Exercises the real MTLSAuthMiddleware, which runs before (and in addition to) JWT login."""
     from fastapi.testclient import TestClient
     from medshield.api.app import create_app
     from medshield.config import get_settings
+    from tests._auth import authenticate
 
     settings = Settings(
         require_mtls=True,
@@ -59,33 +60,30 @@ def test_mtls_fingerprint_validation(tmp_path):
     )
     app = create_app(settings)
     app.dependency_overrides[get_settings] = lambda: settings
-    client = TestClient(app)
+    client = authenticate(TestClient(app))   # login itself is exempt from mTLS
     upload = lambda headers: client.post(
         "/api/v1/studies", headers=headers,
         files={"file": ("s.dcm", create_raw_dicom_bytes(), "application/dicom")},
     )
 
-    # Missing cert
+    # Missing cert -> rejected by the mTLS layer (JSON "error"), before JWT checks
     resp = upload({})
     assert resp.status_code == 401
     assert "Missing X-Client-Cert-SHA256" in resp.json()["error"]
-    # Invalid cert
+    # Untrusted cert
     resp = upload({"X-Client-Cert-SHA256": "untrusted-bad-thumbprint"})
     assert resp.status_code == 401
     assert "Unauthorized" in resp.json()["error"]
-    # Valid cert
-    assert upload({"X-Client-Cert-SHA256": "valid-cert-thumbprint-01"}).status_code == 201
-    # Exempt routes stay reachable without a cert
-    assert client.get("/health").status_code == 200
-
-    # With mTLS disabled the same upload succeeds without a cert
-    settings_off = Settings(require_mtls=False, storage_path=str(tmp_path / "enc2"))
-    app_off = create_app(settings_off)
-    app_off.dependency_overrides[get_settings] = lambda: settings_off
-    resp = TestClient(app_off).post(
-        "/api/v1/studies", files={"file": ("s.dcm", create_raw_dicom_bytes(), "application/dicom")}
+    # Valid cert (case-insensitive) + valid login -> accepted
+    assert upload({"X-Client-Cert-SHA256": "VALID-CERT-THUMBPRINT-01"}).status_code == 201
+    # Valid cert but no login -> rejected by JWT auth instead (JSON "detail")
+    anonymous = TestClient(app).post(
+        "/api/v1/studies", headers={"X-Client-Cert-SHA256": "valid-cert-thumbprint-01"},
+        files={"file": ("s.dcm", create_raw_dicom_bytes(), "application/dicom")},
     )
-    assert resp.status_code == 201
+    assert anonymous.status_code == 401 and "detail" in anonymous.json()
+    # Health stays public
+    assert TestClient(app).get("/health").status_code == 200
 
 def test_study_ingestion_service(tmp_path):
     storage_dir = str(tmp_path / "enc_studies")

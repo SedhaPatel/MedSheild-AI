@@ -1,0 +1,55 @@
+from medshield.auth.models import (
+    ROLE_ADMIN,
+    ROLE_CLINICIAN,
+    ROLE_PRIVACY_OFFICER,
+    ALL_ROLES,
+    UserPublic,
+    UserInDB,
+    LoginRequest,
+    Token,
+)
+from medshield.auth.security import hash_password, verify_password, create_access_token, decode_access_token
+from medshield.auth.users import get_user_by_username, authenticate_user, add_user, list_users, reset_user_db
+from medshield.auth.dependencies import (
+    get_current_user,
+    require_roles,
+    require_clinician,
+    require_privacy_officer,
+    require_admin,
+    require_authenticated_user,
+    verify_study_access,
+    register_study_owner,
+    get_study_owner,
+    clear_study_owners,
+)
+
+__all__ = [
+    "ROLE_ADMIN",
+    "ROLE_CLINICIAN",
+    "ROLE_PRIVACY_OFFICER",
+    "ALL_ROLES",
+    "UserPublic",
+    "UserInDB",
+    "LoginRequest",
+    "Token",
+    "hash_password",
+    "verify_password",
+    "create_access_token",
+    "decode_access_token",
+    "get_user_by_username",
+    "authenticate_user",
+    "add_user",
+    "list_users",
+    "reset_user_db",
+    "get_current_user",
+    "require_roles",
+    "require_clinician",
+    "require_privacy_officer",
+    "require_admin",
+    "require_authenticated_user",
+    "verify_study_access",
+    "register_study_owner",
+    "get_study_owner",
+    "clear_study_owners",
+]
+

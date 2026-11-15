@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import { AppShell } from '@/components/layout/AppShell'
+import { LoginPage } from '@/components/auth/LoginPage'
 import { StudiesPage } from '@/pages/StudiesPage'
 import { ScanChatDrawer } from '@/components/diagnostics/ScanChatDrawer'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -27,15 +28,17 @@ function RouteFallback() {
 export function App() {
   const isLoading = useWorkstationStore((s) => s.isLoading)
   const loadingMessage = useWorkstationStore((s) => s.loadingMessage)
-  const bootstrap = useWorkstationStore((s) => s.bootstrap)
+  const isAuthenticated = useWorkstationStore((s) => s.isAuthenticated)
+  const isAuthLoading = useWorkstationStore((s) => s.isAuthLoading)
+  const checkAuth = useWorkstationStore((s) => s.checkAuth)
   const setViewMode = useWorkstationStore((s) => s.setViewMode)
   const toggleInvert = useWorkstationStore((s) => s.toggleInvert)
   const triggerZoomStep = useWorkstationStore((s) => s.triggerZoomStep)
   const triggerResetViewport = useWorkstationStore((s) => s.triggerResetViewport)
 
   useEffect(() => {
-    void bootstrap()
-  }, [bootstrap])
+    void checkAuth()
+  }, [checkAuth])
 
   // Global radiologist keyboard hotkeys
   useEffect(() => {
@@ -61,6 +64,36 @@ export function App() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [setViewMode, toggleInvert, triggerZoomStep, triggerResetViewport])
+
+  if (isAuthLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-bg-canvas">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-border-strong border-t-accent-brand" />
+          <p className="text-xs font-medium text-text-secondary">Verifying session...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <>
+        <LoginPage />
+        <Toaster
+          theme="light"
+          position="bottom-left"
+          duration={2800}
+          toastOptions={{
+            classNames: {
+              toast: '!bg-bg-panel !border !border-border-strong !text-text-primary !font-sans',
+              description: '!text-text-secondary',
+            },
+          }}
+        />
+      </>
+    )
+  }
 
   return (
     <>

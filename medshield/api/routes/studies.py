@@ -1,5 +1,6 @@
 import io
 from datetime import datetime, timezone
+from typing import Optional
 import pydicom
 from pydicom.dataset import FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian
@@ -7,6 +8,8 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
 from medshield.config import Settings, get_settings
+from medshield.auth.dependencies import require_clinician, register_study_owner
+from medshield.auth.models import UserPublic
 from medshield.anonymization.metadata import anonymize_dicom_metadata
 from medshield.anonymization.pixel_cleaner import clean_pixel_annotations
 from medshield.crypto.envelope import encrypt_envelope
@@ -115,6 +118,7 @@ def process_and_encrypt_study(
 @router.post("", response_model=IngestionResponse, status_code=status.HTTP_201_CREATED)
 def upload_study(
     file: UploadFile = File(...),
+    current_user: Optional[UserPublic] = Depends(require_clinician),
     settings: Settings = Depends(get_settings),
 ):
     # Sync endpoint: FastAPI runs it in a worker thread, keeping CPU-bound de-identification
@@ -127,7 +131,10 @@ def upload_study(
                 status_code=413,
                 detail=f"Upload exceeds the {settings.max_upload_mb:g} MB limit (MEDSHIELD_MAX_UPLOAD_MB).",
             )
-        return process_and_encrypt_study(contents, settings)
+        res = process_and_encrypt_study(contents, settings)
+        if current_user:
+            register_study_owner(res.anonymous_study_instance_uid, current_user.username)
+        return res
     except HTTPException:
         raise
     except ValueError as ve:

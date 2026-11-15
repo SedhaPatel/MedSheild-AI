@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from medshield.api.app import create_app
 from medshield.config import Settings, get_settings
+from tests._auth import authenticate
 from medshield.ml.offline_assistant import answer, detect_topics, is_heatmap_question, suggest_follow_ups
 
 PREDS = [
@@ -137,7 +138,7 @@ def _client(tmp_path, pepper):
                         chat_provider="gemini", gemini_api_key="")
     app = create_app(settings)
     app.dependency_overrides[get_settings] = lambda: settings
-    return TestClient(app)
+    return authenticate(TestClient(app))
 
 
 def test_chat_returns_suggestions_and_reuses_cached_model_results(tmp_path, monkeypatch):

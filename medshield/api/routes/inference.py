@@ -1,9 +1,11 @@
 import io
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 import pydicom
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from medshield.config import Settings, get_settings
+from medshield.auth.dependencies import check_study_access, require_clinician
+from medshield.auth.models import UserPublic
 from medshield.crypto.envelope import decrypt_envelope
 from medshield.crypto.kms_provider import KMSProvider
 from medshield.storage.encrypted_store import EncryptedStore
@@ -101,8 +103,15 @@ def generate_study_heatmap(
 @router.post("/inference/{study_uid}")
 def run_inference(
     study_uid: str,
+    current_user: Optional[UserPublic] = Depends(require_clinician),
     settings: Settings = Depends(get_settings)
 ):
+    # Sync endpoint (runs in a worker thread); same rule as verify_study_access
+    if current_user and not check_study_access(study_uid, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Forbidden: User '{current_user.username}' is not authorized to access study '{study_uid}'",
+        )
     try:
         return process_study_inference(study_uid, settings)
     except KeyError as ke:
@@ -117,8 +126,15 @@ def run_inference(
 def get_heatmap(
     study_uid: str,
     pathology: str,
+    current_user: Optional[UserPublic] = Depends(require_clinician),
     settings: Settings = Depends(get_settings)
 ):
+    # Sync endpoint (runs in a worker thread); same rule as verify_study_access
+    if current_user and not check_study_access(study_uid, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Forbidden: User '{current_user.username}' is not authorized to access study '{study_uid}'",
+        )
     try:
         img_bytes = generate_study_heatmap(study_uid, pathology, settings)
         return Response(content=img_bytes, media_type="image/png")

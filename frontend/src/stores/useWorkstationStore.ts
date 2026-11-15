@@ -6,6 +6,7 @@ import type {
   ScanChatMessage,
   ScanChatTurn,
   StudyAnalysisResponse,
+  User,
   ViewPlaneMode,
   WorklistEntry,
 } from '@/types/clinical'
@@ -13,14 +14,24 @@ import {
   ApiError,
   analyzeSampleCase,
   analyzeUploadedStudy,
+  fetchCurrentUser,
   fetchReferenceSamples,
   fetchWorklist,
+  getAuthToken,
+  loginApi,
+  logoutApi,
   reanalyzeStoredStudy,
   sendScanChatMessage,
+  setAuthToken,
   shredStudyKey,
 } from '@/lib/api'
 
 export interface WorkstationState {
+  user: User | null
+  token: string | null
+  isAuthenticated: boolean
+  isAuthLoading: boolean
+
   samples: SampleCase[]
   worklist: WorklistEntry[]
   activeStudy: StudyAnalysisResponse | null
@@ -39,6 +50,9 @@ export interface WorkstationState {
   chatMessagesByStudy: Record<string, ScanChatMessage[]>
   previewHeatmap: boolean
 
+  checkAuth: () => Promise<void>
+  login: (username: string, password: string) => Promise<boolean>
+  logout: () => Promise<void>
   bootstrap: () => Promise<void>
   ingestSample: (sampleId: string) => Promise<void>
   ingestFile: (file: File) => Promise<void>
@@ -70,6 +84,11 @@ export const selectIsActiveStudyShredded = (s: WorkstationState): boolean =>
   )
 
 export const useWorkstationStore = create<WorkstationState>((set, get) => ({
+  user: null,
+  token: getAuthToken(),
+  isAuthenticated: false,
+  isAuthLoading: true,
+
   samples: [],
   worklist: [],
   activeStudy: null,
@@ -88,6 +107,66 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
   chatMessagesByStudy: {},
   previewHeatmap: false,
 
+  checkAuth: async () => {
+    const token = getAuthToken()
+    if (!token) {
+      set({ user: null, token: null, isAuthenticated: false, isAuthLoading: false })
+      return
+    }
+    try {
+      const user = await fetchCurrentUser()
+      set({ user, token, isAuthenticated: true, isAuthLoading: false })
+      void get().bootstrap()
+    } catch {
+      setAuthToken(null)
+      set({ user: null, token: null, isAuthenticated: false, isAuthLoading: false })
+    }
+  },
+
+  login: async (username, password) => {
+    set({ isLoading: true, loadingMessage: 'Authenticating credentials...' })
+    try {
+      const res = await loginApi(username, password)
+      set({
+        user: res.user,
+        token: res.access_token,
+        isAuthenticated: true,
+        isLoading: false,
+        loadingMessage: '',
+      })
+      toast.success(`Welcome, ${res.user.full_name}`, {
+        description: `Authenticated with role: ${res.user.role.toUpperCase()}`,
+      })
+      await get().bootstrap()
+      return true
+    } catch (err) {
+      set({ isLoading: false, loadingMessage: '' })
+      toast.error('Authentication failed', {
+        description: err instanceof Error ? err.message : 'Invalid credentials',
+      })
+      return false
+    }
+  },
+
+  logout: async () => {
+    try {
+      await logoutApi()
+    } catch {
+      // Ignore network errors during logout
+    }
+    set({
+      user: null,
+      token: null,
+      isAuthenticated: false,
+      samples: [],
+      worklist: [],
+      activeStudy: null,
+      activeSampleId: null,
+      chatMessagesByStudy: {},
+    })
+    toast.info('Signed out of MedShield Workstation')
+  },
+
   bootstrap: async () => {
     try {
       const [samples, worklist] = await Promise.all([
@@ -96,6 +175,10 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
       ])
       set({ samples, worklist })
     } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        void get().logout()
+        return
+      }
       toast.error('Failed to connect to MedShield API', {
         description: err instanceof Error ? err.message : 'Check uvicorn server status',
       })
@@ -245,9 +328,16 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
         description: `${res.revoked_kek_id.slice(-24)} overwritten; ciphertext permanently unrecoverable.`,
       })
     } catch (err) {
-      toast.error('Crypto-shredding failed', {
-        description: err instanceof Error ? err.message : 'Failed to shred key',
-      })
+      if (err instanceof ApiError && err.status === 403) {
+        toast.error('Access Denied: Privacy Officer Required', {
+          description:
+            'Cryptographic shredding is restricted to Privacy Officers under DPDP Act Sec. 12. Clinicians cannot destroy study encryption keys.',
+        })
+      } else {
+        toast.error('Crypto-shredding failed', {
+          description: err instanceof Error ? err.message : 'Failed to shred key',
+        })
+      }
     } finally {
       set({ isLoading: false, loadingMessage: '' })
     }

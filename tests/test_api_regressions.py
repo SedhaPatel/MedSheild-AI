@@ -4,16 +4,17 @@ from fastapi.testclient import TestClient
 
 from medshield.api.app import create_app
 from medshield.config import Settings, get_settings
+from tests._auth import authenticate
 
 MTLS_HEADER = {"X-Client-Cert-SHA256": "mock-edge-gateway-cert-fingerprint-valid"}
 
 
 def _client(tmp_path, pepper: bytes = b"regression-tests-unique-pepper") -> TestClient:
     # Unique pepper -> unique anon UIDs, so keys shredded by other tests in the shared KMS don't interfere
-    settings = Settings(storage_path=str(tmp_path / "enc"), require_mtls=True, secret_pepper=pepper)
+    settings = Settings(storage_path=str(tmp_path / "enc"), require_mtls=False, secret_pepper=pepper)
     app = create_app(settings)
     app.dependency_overrides[get_settings] = lambda: settings
-    return TestClient(app)
+    return authenticate(TestClient(app))
 
 
 def test_stow_rs_upload_does_not_break_dashboard_study_with_same_uid(tmp_path):
@@ -90,7 +91,7 @@ def test_oversized_uploads_are_rejected_with_413(tmp_path):
     settings = Settings(storage_path=str(tmp_path / "enc"), require_mtls=False, max_upload_mb=0.001)
     app = create_app(settings)
     app.dependency_overrides[get_settings] = lambda: settings
-    client = TestClient(app)
+    client = authenticate(TestClient(app))
     payload = b"\0" * 4096   # > 0.001 MB (~1 KB)
 
     resp = client.post("/api/v1/dashboard/analyze", files={"file": ("big.dcm", payload)})

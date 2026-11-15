@@ -12,6 +12,7 @@ from medshield.api.middleware.audit_logger import AuditLoggingMiddleware
 from medshield.api.routes.studies import router as studies_router
 from medshield.api.routes.inference import router as inference_router
 from medshield.api.routes.dashboard import router as dashboard_router
+from medshield.api.routes.auth import router as auth_router
 from medshield.utils.logging import configure_logging
 
 mimetypes.add_type("application/wasm", ".wasm")
@@ -45,6 +46,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     )
 
     # Register API Routers
+    app.include_router(auth_router)
     app.include_router(studies_router)
     app.include_router(inference_router)
     app.include_router(dashboard_router)
