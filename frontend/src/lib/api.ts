@@ -82,6 +82,24 @@ export function resolveAbsoluteApiUrl(path: string): string {
   return resolved
 }
 
+/** Turns FastAPI error bodies (string detail, or a list of validation errors) into readable text. */
+function describeErrorBody(body: unknown): string {
+  const errObj = body as { detail?: unknown; message?: unknown } | null
+  const detail = errObj?.detail ?? errObj?.message
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail
+      .map((d: { loc?: unknown[]; msg?: string }) => {
+        const field = Array.isArray(d.loc) ? d.loc.filter((p) => p !== 'body').join('.') : ''
+        return field ? `${field}: ${d.msg ?? 'invalid'}` : (d.msg ?? 'invalid request')
+      })
+      .join('; ')
+  }
+  return ''
+}
+
+const UNREACHABLE_MESSAGE = "Couldn't reach the MedShield server. Check that the backend is running, then try again."
+
 async function safeApiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getAuthToken()
   const headers = new Headers(init?.headers)
@@ -89,23 +107,30 @@ async function safeApiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     headers.set('Authorization', `Bearer ${token}`)
   }
 
-  const res = await fetch(resolveApiUrl(path), {
-    ...init,
-    headers,
-    credentials: init?.credentials ?? 'include',
-  })
+  let res: Response
+  try {
+    res = await fetch(resolveApiUrl(path), {
+      ...init,
+      headers,
+      credentials: init?.credentials ?? 'include',
+    })
+  } catch {
+    // Network failure (server down, offline, blocked by CORS)
+    throw new ApiError(UNREACHABLE_MESSAGE, 0)
+  }
   const raw = await res.text()
 
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
   } catch {
+    // Non-JSON gateway errors come from a proxy in front of a backend that isn't responding
+    if ([502, 503, 504].includes(res.status)) throw new ApiError(UNREACHABLE_MESSAGE, res.status)
     throw new ApiError(raw.trim() || `Server returned HTTP ${res.status}`, res.status)
   }
 
   if (!res.ok) {
-    const errObj = parsed as { detail?: string; message?: string }
-    throw new ApiError(errObj.detail || errObj.message || `HTTP ${res.status} error`, res.status)
+    throw new ApiError(describeErrorBody(parsed) || `HTTP ${res.status} error`, res.status)
   }
 
   return parsed as T
@@ -159,6 +184,11 @@ export function appendAuthTokenToUrl(urlStr: string): string {
   if (urlStr.includes('token=')) return urlStr
   const separator = urlStr.includes('?') ? '&' : '?'
   return `${urlStr}${separator}token=${encodeURIComponent(token)}`
+}
+
+/** Public: whether the server allows the built-in demo accounts (shown on the login page only then). */
+export async function fetchAuthOptions(): Promise<{ demo_accounts_enabled: boolean }> {
+  return safeApiRequest<{ demo_accounts_enabled: boolean }>('/api/v1/auth/options')
 }
 
 export async function fetchReferenceSamples(): Promise<SampleCase[]> {

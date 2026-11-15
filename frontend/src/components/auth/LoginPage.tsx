@@ -1,52 +1,43 @@
-import { useState, type FormEvent } from 'react'
-import { KeyRound, Lock, ShieldCheck, UserCheck, Stethoscope, ShieldAlert, Cpu } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
+import { fetchAuthOptions } from '@/lib/api'
 import { useWorkstationStore } from '@/stores/useWorkstationStore'
 
-interface PersonaPreset {
+interface DemoAccount {
+  role: string
   name: string
-  roleLabel: string
-  roleVariant: 'teal' | 'attention' | 'verified'
+  canDo: string
   username: string
   password: string
-  icon: typeof Stethoscope
-  description: string
-  permissions: string
 }
 
-const PRESET_PERSONAS: PersonaPreset[] = [
+// Only offered when the server reports demo accounts are enabled (development, or explicitly in production)
+const DEMO_ACCOUNTS: DemoAccount[] = [
   {
-    name: 'Dr. Sterling (Clinician)',
-    roleLabel: 'CLINICIAN',
-    roleVariant: 'teal',
+    role: 'Clinician',
+    name: 'Dr. Sterling',
+    canDo: 'Upload and read own studies, viewer, scan chat',
     username: 'dr_sterling',
     password: 'ClinicianSec2026!',
-    icon: Stethoscope,
-    description: 'Chest radiology resident with diagnostic inference & PACS access.',
-    permissions: 'View DICOM • Run AI Diagnostics • Grad-CAM • Scan Chat',
   },
   {
-    name: 'Clara Vance (Privacy Officer)',
-    roleLabel: 'PRIVACY OFFICER',
-    roleVariant: 'attention',
+    role: 'Privacy officer',
+    name: 'Clara Vance',
+    canDo: 'Audit all studies, erase studies',
     username: 'officer_clara',
     password: 'PrivacySec2026!',
-    icon: ShieldAlert,
-    description: 'Data protection officer authorized for DPDP Sec. 12 key destruction.',
-    permissions: 'Execute Crypto-Shredding • Audit Logs • Key Lifecycle Review',
   },
   {
-    name: 'Dev Admin (Security Admin)',
-    roleLabel: 'SECURITY ADMIN',
-    roleVariant: 'verified',
+    role: 'Administrator',
+    name: 'Security admin',
+    canDo: 'Everything, including user management',
     username: 'admin_sec',
     password: 'AdminSec2026!',
-    icon: Cpu,
-    description: 'System administrator managing RBAC user registry & platform security.',
-    permissions: 'User Management • RBAC Provisioning • System Telemetry',
   },
 ]
+
+const inputClass =
+  'h-9 w-full rounded-[var(--control-radius)] border border-border-strong bg-bg-panel px-3 text-[13px] text-text-primary placeholder:text-text-muted focus-visible:outline-2 focus-visible:outline-border-focus disabled:opacity-60'
 
 export function LoginPage() {
   const login = useWorkstationStore((s) => s.login)
@@ -55,187 +46,115 @@ export function LoginPage() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [demoEnabled, setDemoEnabled] = useState(false)
+
+  useEffect(() => {
+    fetchAuthOptions()
+      .then((opts) => setDemoEnabled(opts.demo_accounts_enabled))
+      .catch(() => setDemoEnabled(false))
+  }, [])
+
+  const signIn = async (user: string, pass: string) => {
+    setErrorMsg(null)
+    const success = await login(user, pass)
+    if (!success) setErrorMsg('Incorrect username or password.')
+  }
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     if (!username.trim() || !password) {
-      setErrorMsg('Please enter both username and password.')
+      setErrorMsg('Enter your username and password.')
       return
     }
-    setErrorMsg(null)
-    const success = await login(username.trim(), password)
-    if (!success) {
-      setErrorMsg('Invalid credentials. Check username and password.')
-    }
-  }
-
-  const handleQuickLogin = async (preset: PersonaPreset) => {
-    setUsername(preset.username)
-    setPassword(preset.password)
-    setErrorMsg(null)
-    await login(preset.username, preset.password)
+    await signIn(username.trim(), password)
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-bg-canvas px-4 py-8 text-text-primary">
-      <div className="w-full max-w-md space-y-6">
-        {/* Academic Header Banner */}
-        <div className="text-center space-y-2">
-          <div className="inline-flex items-center gap-2 rounded-full border border-border-subtle bg-bg-panel px-3 py-1 text-[11px] font-medium text-text-secondary">
-            <span className="h-2 w-2 rounded-full bg-accent-verified animate-pulse" />
-            <span>Zero-Trust Architecture • Information Security &amp; Cryptography</span>
-          </div>
-
-          <div className="flex items-center justify-center gap-2.5 pt-1">
-            <span className="flex h-10 w-10 items-center justify-center rounded-[var(--control-radius)] border border-accent-brand-border bg-accent-brand-soft text-accent-brand shadow-xs">
-              <ShieldCheck className="h-6 w-6" />
-            </span>
-            <div className="text-left">
-              <h1 className="font-display text-xl font-bold tracking-tight text-text-primary">
-                MedShield-AI
-              </h1>
-              <p className="text-xs text-text-muted">Zero-Trust Clinical AI & Crypto Workstation</p>
-            </div>
-          </div>
+    <div className="flex min-h-screen items-center justify-center bg-bg-canvas px-4 py-10 text-[13px] text-text-primary">
+      <div className="w-full max-w-sm space-y-5">
+        <div>
+          <div className="text-[17px] leading-6 font-semibold tracking-tight">MedShield</div>
+          <div className="text-xs text-text-muted">Chest X-ray triage</div>
         </div>
 
-        {/* Credentials Form Box */}
-        <div className="rounded-[var(--panel-radius)] border border-border-strong bg-bg-panel p-6 shadow-xs">
-          <div className="mb-5 flex items-center justify-between border-b border-border-subtle pb-3">
-            <div>
-              <h2 className="text-sm font-semibold text-text-primary">Clinical Portal Sign-In</h2>
-              <p className="text-[11px] text-text-secondary">
-                RFC 7519 JWT + Argon2id / bcrypt Authentication
+        <section className="rounded-[var(--panel-radius)] border border-border-subtle bg-bg-panel">
+          <h1 className="border-b border-border-subtle px-4 py-3 text-[15px] font-semibold">Sign in</h1>
+          <form onSubmit={handleSubmit} className="space-y-3 px-4 py-4">
+            {errorMsg && (
+              <p role="alert" className="text-accent-critical">
+                {errorMsg}
               </p>
-            </div>
-            <Badge variant="teal">RBAC Enforced</Badge>
-          </div>
-
-          {errorMsg && (
-            <div className="mb-4 rounded-[var(--control-radius)] border border-accent-critical-border bg-accent-critical-soft p-3 text-xs text-accent-critical">
-              {errorMsg}
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-4">
+            )}
             <div>
-              <label
-                htmlFor="username"
-                className="mb-1 block text-xs font-medium text-text-secondary"
-              >
-                Username or Staff Identifier
+              <label htmlFor="username" className="mb-1 block text-xs text-text-secondary">
+                Username
               </label>
-              <div className="relative">
-                <input
-                  id="username"
-                  type="text"
-                  autoComplete="username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="e.g. dr_sterling"
-                  className="w-full rounded-[var(--control-radius)] border border-border-strong bg-bg-input px-3 py-2 text-xs text-text-primary placeholder:text-text-muted focus:border-border-focus focus:outline-none focus:ring-1 focus:ring-border-focus"
-                  disabled={isLoading}
-                />
-              </div>
+              <input
+                id="username"
+                type="text"
+                autoComplete="username"
+                autoFocus
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className={inputClass}
+                disabled={isLoading}
+              />
             </div>
-
             <div>
-              <label
-                htmlFor="password"
-                className="mb-1 block text-xs font-medium text-text-secondary"
-              >
+              <label htmlFor="password" className="mb-1 block text-xs text-text-secondary">
                 Password
               </label>
-              <div className="relative">
-                <input
-                  id="password"
-                  type="password"
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••••••"
-                  className="w-full rounded-[var(--control-radius)] border border-border-strong bg-bg-input px-3 py-2 text-xs text-text-primary placeholder:text-text-muted focus:border-border-focus focus:outline-none focus:ring-1 focus:ring-border-focus"
-                  disabled={isLoading}
-                />
-              </div>
+              <input
+                id="password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className={inputClass}
+                disabled={isLoading}
+              />
             </div>
-
-            <Button
-              type="submit"
-              variant="primary"
-              className="w-full h-9 text-xs font-medium"
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <span className="flex items-center gap-1.5">
-                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-text-inverse border-t-transparent" />
-                  Authenticating...
-                </span>
-              ) : (
-                <span className="flex items-center gap-1.5">
-                  <KeyRound className="h-3.5 w-3.5" />
-                  Sign In to Workstation
-                </span>
-              )}
+            <Button type="submit" variant="primary" className="w-full" size="lg" disabled={isLoading}>
+              {isLoading ? 'Signing in…' : 'Sign in'}
             </Button>
           </form>
-        </div>
+        </section>
 
-        {/* Quick Viva Evaluator Persona Presets */}
-        <div className="space-y-2.5">
-          <div className="flex items-center justify-between px-1">
-            <span className="text-[11px] font-medium uppercase tracking-wider text-text-muted">
-              Viva & Demonstration RBAC Personas
-            </span>
-            <span className="text-[10px] text-text-muted">Click to sign in instantly</span>
-          </div>
+        {demoEnabled && (
+          <section className="rounded-[var(--panel-radius)] border border-border-subtle bg-bg-panel">
+            <div className="border-b border-border-subtle px-4 py-2.5">
+              <h2 className="text-[13px] font-semibold">Demo accounts</h2>
+              <p className="text-xs text-text-muted">For testing only. Select one to sign in.</p>
+            </div>
+            <ul className="divide-y divide-border-subtle">
+              {DEMO_ACCOUNTS.map((account) => (
+                <li key={account.username}>
+                  <button
+                    type="button"
+                    disabled={isLoading}
+                    onClick={() => {
+                      setUsername(account.username)
+                      setPassword(account.password)
+                      void signIn(account.username, account.password)
+                    }}
+                    className="flex w-full cursor-pointer items-baseline justify-between gap-3 px-4 py-2.5 text-left transition-colors hover:bg-bg-elevated focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-border-focus disabled:opacity-50"
+                  >
+                    <span>
+                      <span className="block font-medium">{account.role}</span>
+                      <span className="block text-xs text-text-muted">{account.canDo}</span>
+                    </span>
+                    <span className="shrink-0 font-mono text-xs text-text-secondary">{account.username}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
-          <div className="space-y-2">
-            {PRESET_PERSONAS.map((preset) => {
-              const Icon = preset.icon
-              return (
-                <button
-                  key={preset.username}
-                  type="button"
-                  onClick={() => handleQuickLogin(preset)}
-                  disabled={isLoading}
-                  className="group flex w-full flex-col gap-1 rounded-[var(--panel-radius)] border border-border-subtle bg-bg-panel p-3 text-left transition-colors hover:border-border-strong hover:bg-bg-elevated focus-visible:outline-2 focus-visible:outline-border-focus disabled:opacity-50"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="flex h-6 w-6 items-center justify-center rounded-[var(--control-radius)] bg-bg-elevated text-text-secondary group-hover:text-accent-brand">
-                        <Icon className="h-3.5 w-3.5" />
-                      </span>
-                      <span className="text-xs font-semibold text-text-primary">
-                        {preset.name}
-                      </span>
-                    </div>
-                    <Badge variant={preset.roleVariant}>{preset.roleLabel}</Badge>
-                  </div>
-                  <p className="text-[11px] text-text-secondary pl-8">{preset.description}</p>
-                  <div className="mt-1 flex items-center gap-1 pl-8 text-[10px] text-text-muted font-mono">
-                    <Lock className="h-2.5 w-2.5" />
-                    <span>Perms: {preset.permissions}</span>
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-        </div>
-
-        {/* Footer Security Badges */}
-        <div className="flex items-center justify-center gap-4 text-[11px] text-text-muted">
-          <span className="inline-flex items-center gap-1">
-            <UserCheck className="h-3 w-3 text-accent-verified" />
-            Stateless JWT
-          </span>
-          <span>•</span>
-          <span>AES-256-GCM Envelope</span>
-          <span>•</span>
-          <span>Diffie–Hellman MODP</span>
-        </div>
+        <p className="text-xs leading-snug text-text-muted">
+          Research and demo use only. Not a diagnostic device.
+        </p>
       </div>
     </div>
   )
 }
-

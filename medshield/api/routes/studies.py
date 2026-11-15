@@ -20,7 +20,7 @@ from medshield.utils.logging import get_audit_logger
 router = APIRouter(prefix="/api/v1/studies", tags=["Studies Ingestion"])
 audit_logger = get_audit_logger("medshield.audit.studies")
 
-_shared_kms = LocalKMSProvider()
+_shared_kms = LocalKMSProvider(keystore_path=get_settings().kms_keystore_path)
 _shared_store: dict = {}
 
 class IngestionResponse(BaseModel):
@@ -40,7 +40,7 @@ def process_and_encrypt_study(
 ) -> IngestionResponse:
     """
     Core synchronous service pipeline:
-    DICOM Parse -> PS 3.15 Annex E Metadata De-ID -> Pixel PHI OCR Redaction ->
+    DICOM Parse -> PS 3.15 Annex E Metadata De-ID -> Pixel PHI Burned-in Text Redaction ->
     AES-256-GCM Envelope Encryption -> Encrypted Storage Persistence.
     """
     if not contents:
@@ -116,17 +116,27 @@ def process_and_encrypt_study(
     )
 
 @router.post("", response_model=IngestionResponse, status_code=status.HTTP_201_CREATED)
-async def upload_study(
+def upload_study(
     file: UploadFile = File(...),
     current_user: Optional[UserPublic] = Depends(require_clinician),
     settings: Settings = Depends(get_settings),
 ):
+    # Sync endpoint: FastAPI runs it in a worker thread, keeping CPU-bound de-identification
+    # and encryption off the event loop.
     try:
-        contents = await file.read()
+        max_bytes = int(settings.max_upload_mb * 1024 * 1024)
+        contents = file.file.read(max_bytes + 1)
+        if len(contents) > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Upload exceeds the {settings.max_upload_mb:g} MB limit (MEDSHIELD_MAX_UPLOAD_MB).",
+            )
         res = process_and_encrypt_study(contents, settings)
         if current_user:
             register_study_owner(res.anonymous_study_instance_uid, current_user.username)
         return res
+    except HTTPException:
+        raise
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:

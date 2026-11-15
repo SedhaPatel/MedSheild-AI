@@ -4,18 +4,29 @@ import pydicom
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from medshield.config import Settings, get_settings
-from medshield.auth.dependencies import require_clinician, verify_study_access
+from medshield.auth.dependencies import check_study_access, require_clinician
 from medshield.auth.models import UserPublic
 from medshield.crypto.envelope import decrypt_envelope
 from medshield.crypto.kms_provider import KMSProvider
 from medshield.storage.encrypted_store import EncryptedStore
 from medshield.ml.inference_engine import InferenceEngine
+from medshield.ml.model import build_thoracic_model
 from medshield.utils.logging import get_audit_logger
 
 router = APIRouter(prefix="/api/v1", tags=["Inference & Diagnostics"])
 audit_logger = get_audit_logger("medshield.audit.inference")
 
-_shared_engine = InferenceEngine()
+def _build_shared_engine() -> InferenceEngine:
+    settings = get_settings()
+    model = build_thoracic_model(
+        checkpoint_path=settings.model_checkpoint_path,
+        architecture=settings.model_architecture,
+    )
+    return InferenceEngine(model=model)
+
+
+# Single model instance shared by the inference and dashboard routers
+_shared_engine = _build_shared_engine()
 
 def process_study_inference(
     study_uid: str,
@@ -90,13 +101,17 @@ def generate_study_heatmap(
     return bio.getvalue()
 
 @router.post("/inference/{study_uid}")
-async def run_inference(
+def run_inference(
     study_uid: str,
     current_user: Optional[UserPublic] = Depends(require_clinician),
     settings: Settings = Depends(get_settings)
 ):
-    if current_user:
-        await verify_study_access(study_uid, current_user)
+    # Sync endpoint (runs in a worker thread); same rule as verify_study_access
+    if current_user and not check_study_access(study_uid, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Forbidden: User '{current_user.username}' is not authorized to access study '{study_uid}'",
+        )
     try:
         return process_study_inference(study_uid, settings)
     except KeyError as ke:
@@ -108,14 +123,18 @@ async def run_inference(
         raise HTTPException(status_code=500, detail="Internal server error during diagnostic inference.")
 
 @router.get("/heatmaps/{study_uid}/{pathology}")
-async def get_heatmap(
+def get_heatmap(
     study_uid: str,
     pathology: str,
     current_user: Optional[UserPublic] = Depends(require_clinician),
     settings: Settings = Depends(get_settings)
 ):
-    if current_user:
-        await verify_study_access(study_uid, current_user)
+    # Sync endpoint (runs in a worker thread); same rule as verify_study_access
+    if current_user and not check_study_access(study_uid, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Forbidden: User '{current_user.username}' is not authorized to access study '{study_uid}'",
+        )
     try:
         img_bytes = generate_study_heatmap(study_uid, pathology, settings)
         return Response(content=img_bytes, media_type="image/png")

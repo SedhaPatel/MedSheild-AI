@@ -1,4 +1,4 @@
-import { Badge } from '@/components/ui/badge'
+import { Panel } from '@/components/layout/Panel'
 import {
   Table,
   TableBody,
@@ -7,93 +7,81 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { cn } from '@/lib/utils'
 import { useWorkstationStore } from '@/stores/useWorkstationStore'
+import type { PiiTagDiff } from '@/types/clinical'
 
-export function SafeHarborTable({ compact = false }: { compact?: boolean }) {
+function outcome(row: PiiTagDiff): { label: string; className: string } {
+  if (row.status === 'SANITIZED') {
+    return row.sanitized_value.startsWith('[SCRUBBED')
+      ? { label: 'Removed', className: 'text-accent-verified' }
+      : { label: 'Replaced', className: 'text-accent-verified' }
+  }
+  if (row.status === 'MODIFIED') {
+    return row.sanitized_value.trim() === ''
+      ? { label: 'Emptied', className: 'text-accent-verified' }
+      : { label: 'Changed', className: 'text-text-secondary' }
+  }
+  return { label: 'Unchanged', className: 'text-text-muted' }
+}
+
+export function SafeHarborTable() {
   const activeStudy = useWorkstationStore((s) => s.activeStudy)
+  const rows = activeStudy?.deidentification.tag_diff_matrix ?? []
+  const violations = activeStudy?.deidentification.compliance_violations ?? []
 
   return (
-    <section
-      aria-label="DICOM PS 3.15 Safe Harbor Audit"
-      className={
-        compact
-          ? 'flex h-56 flex-col overflow-hidden rounded-[var(--panel-radius)] border border-border-subtle bg-bg-panel'
-          : 'flex flex-col overflow-hidden rounded-[var(--panel-radius)] border border-border-subtle bg-bg-panel'
-      }
+    <Panel
+      title="Metadata de-identification"
+      aside={activeStudy ? activeStudy.deidentification.safe_harbor_compliance.toLowerCase() : undefined}
     >
-      <div className="flex items-center justify-between border-b border-border-subtle bg-bg-input px-4 py-3">
-        <h2 className="font-display text-xs font-semibold text-text-primary">
-          DICOM PS 3.15 Safe Harbor Attribute Matrix
-        </h2>
-        {activeStudy ? (
-          <Badge
-            variant={
-              activeStudy.deidentification.burned_in_text_redacted
-                ? 'verified'
-                : 'neutral'
-            }
-          >
-            {activeStudy.deidentification.burned_in_text_redacted
-              ? 'Burned-in pixel PHI redacted'
-              : 'No burned-in pixel PHI'}
-          </Badge>
-        ) : (
-          <span className="text-[11px] text-text-muted">Awaiting study</span>
-        )}
-      </div>
-
-      <Table className="min-w-[600px] flex-1 sm:min-w-full sm:table-fixed">
+      <Table className="min-w-[600px] sm:min-w-full sm:table-fixed">
         <TableHeader>
-          <TableRow>
-            <TableHead className="w-24">Tag</TableHead>
-            <TableHead className="w-40">Attribute</TableHead>
-            <TableHead>Pre-Ingestion PHI</TableHead>
-            <TableHead>Post-Ingestion</TableHead>
-            <TableHead className="w-28 text-right">Status</TableHead>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className="w-28 pl-4">Tag</TableHead>
+            <TableHead className="w-44">Attribute</TableHead>
+            <TableHead>Original value</TableHead>
+            <TableHead>Stored value</TableHead>
+            <TableHead className="w-24 pr-4 text-right">Result</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {!activeStudy ? (
-            <TableRow>
-              <TableCell colSpan={5} className="py-8 text-center text-text-muted">
-                Ingest a scan to verify 18 HIPAA Safe Harbor attribute sanitization.
-              </TableCell>
-            </TableRow>
-          ) : (
-            activeStudy.deidentification.tag_diff_matrix.map((row) => {
-              const isScrubbed = row.status === 'SANITIZED'
-              return (
-                <TableRow key={row.tag_hex}>
-                  <TableCell className="font-mono text-text-muted">
-                    {row.tag_hex}
-                  </TableCell>
-                  <TableCell className="truncate font-medium text-text-primary">
-                    {row.tag_name}
-                  </TableCell>
-                  <TableCell
-                    className="truncate font-mono text-accent-critical"
-                    title={row.original_value}
-                  >
-                    {row.original_value}
-                  </TableCell>
-                  <TableCell
-                    className="truncate font-mono text-accent-verified"
-                    title={row.sanitized_value}
-                  >
-                    {row.sanitized_value}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Badge variant={isScrubbed ? 'verified' : 'neutral'}>
-                      {row.status}
-                    </Badge>
-                  </TableCell>
-                </TableRow>
-              )
-            })
-          )}
+          {rows.map((row) => {
+            const o = outcome(row)
+            const removed = row.sanitized_value.startsWith('[SCRUBBED')
+            const emptied = !removed && row.sanitized_value.trim() === ''
+            return (
+              <TableRow key={row.tag_hex}>
+                <TableCell className="pl-4 font-mono text-xs text-text-muted">{row.tag_hex}</TableCell>
+                <TableCell className="truncate text-text-primary" title={row.description}>
+                  {row.tag_name}
+                </TableCell>
+                <TableCell className="truncate font-mono text-xs text-text-secondary" title={row.original_value}>
+                  {row.original_value}
+                </TableCell>
+                <TableCell
+                  className={cn('truncate font-mono text-xs', removed || emptied ? 'text-text-muted italic' : 'text-text-primary')}
+                  title={row.sanitized_value}
+                >
+                  {removed ? 'removed' : emptied ? 'empty' : row.sanitized_value}
+                </TableCell>
+                <TableCell className={cn('pr-4 text-right', o.className)}>{o.label}</TableCell>
+              </TableRow>
+            )
+          })}
         </TableBody>
       </Table>
-    </section>
+      {violations.length > 0 && (
+        <ul className="border-t border-border-subtle px-4 py-2.5 text-xs text-accent-critical">
+          {violations.map((v) => (
+            <li key={v}>{v}</li>
+          ))}
+        </ul>
+      )}
+      <p className="border-t border-border-subtle px-4 py-2.5 text-xs text-text-muted">
+        Original values are held in server memory for this session only and are never written to disk; the stored,
+        encrypted file contains only the de-identified values.
+      </p>
+    </Panel>
   )
 }
-

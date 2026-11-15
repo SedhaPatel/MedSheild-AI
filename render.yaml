@@ -2,7 +2,7 @@ services:
   - type: web
     name: medshield-ai-api
     runtime: docker
-    # PyTorch + TorchXRayVision DenseNet-121 + EasyOCR require >= 2 GB RAM (Render Standard or higher)
+    # PyTorch + TorchXRayVision DenseNet-121 require >= 2 GB RAM (Render Standard or higher)
     plan: standard
     dockerfilePath: ./Dockerfile
     dockerContext: .

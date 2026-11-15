@@ -91,3 +91,34 @@ def test_encrypted_store_persistence(tmp_path):
     assert not os.path.exists(saved_path)
     assert store.load(study_uid) is None
 
+
+
+def test_local_kms_keystore_persists_keys_and_revocations(tmp_path):
+    import json, os, stat
+    from medshield.crypto.envelope import encrypt_envelope, decrypt_envelope
+    from medshield.crypto.kms_provider import LocalKMSProvider, KeyRevokedError
+
+    path = str(tmp_path / "kms" / "keystore.json")
+    kms = LocalKMSProvider(keystore_path=path)
+    kek_a, kek_b = "arn:test:key/a", "arn:test:key/b"
+    blobs = {}
+    for kek in (kek_a, kek_b):
+        dek, wrapped = kms.generate_data_key(kek)
+        blobs[kek] = encrypt_envelope(b"payload-" + kek.encode(), dek, kek, wrapped)
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+
+    kms.revoke_key(kek_b)
+    stored = json.load(open(path))["keys"]
+    assert stored[kek_b] == {"revoked": True}          # no key material for shredded keys
+
+    restarted = LocalKMSProvider(keystore_path=path)  # simulate a server restart
+    assert decrypt_envelope(blobs[kek_a], restarted) == b"payload-" + kek_a.encode()
+    with pytest.raises(KeyRevokedError):
+        decrypt_envelope(blobs[kek_b], restarted)
+
+
+def test_local_kms_without_keystore_writes_nothing(tmp_path, monkeypatch):
+    from medshield.crypto.kms_provider import LocalKMSProvider
+    monkeypatch.chdir(tmp_path)
+    LocalKMSProvider().generate_data_key("arn:test:key/mem")
+    assert list(tmp_path.iterdir()) == []

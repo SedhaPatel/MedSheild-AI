@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from typing import Dict, List, Optional
 from medshield.auth.models import (
@@ -41,13 +42,28 @@ _INITIAL_USERS: Dict[str, UserInDB] = {
     ),
 }
 
-_user_db: Dict[str, UserInDB] = {k: v.model_copy(deep=True) for k, v in _INITIAL_USERS.items()}
+logger = logging.getLogger("medshield.auth.users")
+
+
+def demo_users_enabled() -> bool:
+    from medshield.config import get_settings
+
+    return get_settings().enable_demo_users
+
+
+def _initial_users() -> Dict[str, UserInDB]:
+    if not demo_users_enabled():
+        return {}
+    return {k: v.model_copy(deep=True) for k, v in _INITIAL_USERS.items()}
+
+
+_user_db: Dict[str, UserInDB] = _initial_users()
 
 
 def reset_user_db() -> None:
-    """Reset the in-memory user registry to default demonstration users."""
+    """Reset the in-memory user registry to the configured accounts (demo users only if enabled)."""
     global _user_db
-    _user_db = {k: v.model_copy(deep=True) for k, v in _INITIAL_USERS.items()}
+    _user_db = _initial_users()
     _load_users_from_env()
 
 
@@ -57,15 +73,26 @@ def _load_users_from_env() -> None:
         return
     try:
         data = json.loads(raw)
-        if isinstance(data, list):
-            for u in data:
-                u_in = UserInDB(**u)
-                _user_db[u_in.username] = u_in
-    except Exception:
-        pass
+        if not isinstance(data, list):
+            raise ValueError("expected a JSON list of user objects")
+        for u in data:
+            u_in = UserInDB(**u)
+            _user_db[u_in.username] = u_in
+    except Exception as exc:
+        # Fail loudly in the logs: a typo here otherwise means nobody can sign in
+        logger.error("MEDSHIELD_USERS_JSON could not be loaded (%s); no users were added from it.", exc)
+
+
+def _warn_if_no_users() -> None:
+    if not _user_db:
+        logger.warning(
+            "No user accounts are configured, so nobody can sign in. Set MEDSHIELD_USERS_JSON "
+            "(see scripts/create_user.py) or MEDSHIELD_ENABLE_DEMO_USERS=true."
+        )
 
 
 _load_users_from_env()
+_warn_if_no_users()
 
 
 def get_user_by_username(username: str) -> Optional[UserInDB]:

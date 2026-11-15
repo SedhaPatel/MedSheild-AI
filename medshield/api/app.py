@@ -23,10 +23,15 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(log_level="INFO")
 
+    # Interactive API docs are for development; hide them in production unless debugging
+    show_docs = settings.environment.lower() != "production" or settings.debug
     app = FastAPI(
         title="MedShield-AI Ingestion and Inference API",
         description="HIPAA and India DPDP-compliant zero-trust DICOM ingestion, AES-256-GCM storage, and disease detection platform.",
-        version="0.1.0"
+        version="0.1.0",
+        docs_url="/docs" if show_docs else None,
+        redoc_url="/redoc" if show_docs else None,
+        openapi_url="/openapi.json" if show_docs else None,
     )
 
     allow_origins = settings.cors_origins
