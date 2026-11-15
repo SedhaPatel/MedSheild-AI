@@ -2,7 +2,7 @@
 
 **Secure, HIPAA & India DPDP-Compliant AI Medical Image Disease Detection System**
 
-> **Production & Cloud Hosting:** The quickest route is a free Hugging Face Space: follow [**DEPLOYMENT.md → Quick start**](DEPLOYMENT.md#quick-start-hugging-face-spaces-free-single-container). DEPLOYMENT.md also covers the full architecture guide (recommended split Docker PaaS + CDN SPA deployment, unified single-container Docker mode, memory/storage requirements, and environment reference).
+> **Production & Cloud Hosting:** The quickest free route is Render: follow [**DEPLOYMENT.md → Quick start: Render**](DEPLOYMENT.md#quick-start-render-free-plan-single-container) (a Hugging Face Space also works but now needs a PRO subscription). DEPLOYMENT.md also covers the full architecture guide (recommended split Docker PaaS + CDN SPA deployment, unified single-container Docker mode, memory/storage requirements, and environment reference).
 
 ---
 
@@ -501,7 +501,7 @@ npm --prefix frontend run build
 ├── .gitignore                      # Ignores storage/, weights/, .env/.env.*, build caches
 ├── pyproject.toml                  # Package metadata, dependencies & pytest config
 ├── railway.toml                    # Railway Docker service + /health check config
-├── render.yaml                     # Render Docker service + 5 GB persistent disk config
+├── render.yaml                     # Render Blueprint: free single-container service (paid disk option documented)
 ├── requirements.txt                # Full backend + dev/test dependencies (includes pyjwt, bcrypt)
 ├── requirements-prod.txt           # Runtime-only production dependencies for Docker
 ├── skills-lock.json                # Installed skill provenance lockfile
