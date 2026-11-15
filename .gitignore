@@ -27,5 +27,6 @@ frontend/node_modules/
 # Local account file from scripts/create_user.py (contains password hashes)
 users.json
 
-# Private Hugging Face Space settings (secrets)
+# Private deployment settings (secrets)
 deploy/huggingface/*.env
+deploy/render/*.env
