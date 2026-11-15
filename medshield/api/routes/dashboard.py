@@ -17,6 +17,20 @@ from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
 from medshield.config import Settings, get_settings
+from medshield.auth.dependencies import (
+    get_current_user,
+    require_clinician,
+    require_privacy_officer,
+    require_authenticated_user,
+    check_study_access,
+    register_study_owner,
+)
+from medshield.auth.models import (
+    ROLE_ADMIN,
+    ROLE_CLINICIAN,
+    ROLE_PRIVACY_OFFICER,
+    UserPublic,
+)
 from medshield.anonymization.metadata import anonymize_dicom_metadata
 from medshield.anonymization.pixel_cleaner import clean_pixel_annotations
 from medshield.crypto.envelope import encrypt_envelope, decrypt_envelope, unpack_envelope_header
@@ -170,7 +184,7 @@ def _png_bytes_to_dicom(png_bytes: bytes, patient_name: str = "DOE^ANONYMOUS") -
 
 
 @router.get("/api/v1/dashboard/samples", tags=["Clinical Dashboard"])
-def list_dashboard_samples():
+def list_dashboard_samples(current_user: Optional[UserPublic] = Depends(get_current_user)):
     """Returns available sample patient cases for instant 1-click evaluation."""
     samples = [
         {
@@ -210,6 +224,7 @@ def analyze_dashboard_study(
     sample_id: Optional[str] = Form(None),
     study_uid: Optional[str] = Form(None),
     pathology_heatmap: str = Form("Pneumonia"),
+    current_user: Optional[UserPublic] = Depends(require_clinician),
     settings: Settings = Depends(get_settings)
 ):
     """
@@ -223,6 +238,11 @@ def analyze_dashboard_study(
     _dashboard_store[settings.storage_path] = store
 
     if study_uid and not sample_id and not file:
+        if isinstance(current_user, UserPublic) and not check_study_access(study_uid, current_user):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Forbidden: User '{current_user.username}' is not authorized to access study '{study_uid}'"
+            )
         if not store.exists(study_uid):
             raise HTTPException(status_code=404, detail=f"Study '{study_uid}' not found in encrypted storage.")
         encrypted_container = store.load(study_uid)
@@ -419,7 +439,9 @@ def analyze_dashboard_study(
         "shannon_entropy": round(shannon_entropy, 5),
         "is_shredded": False,
         "ingested_at_utc": datetime.now(timezone.utc).isoformat(),
+        "owner": current_user.username if isinstance(current_user, UserPublic) else "anonymous",
     }
+    register_study_owner(anon_study_uid, current_user.username if isinstance(current_user, UserPublic) else "anonymous")
 
     return {
         "status": "SUCCESS",
@@ -469,30 +491,45 @@ def analyze_dashboard_study(
     }
 
 
-def _get_sorted_worklist() -> List[Dict[str, Any]]:
+def _get_sorted_worklist(user: Optional[UserPublic] = None) -> List[Dict[str, Any]]:
     urgency_rank = {"STAT_CRITICAL": 0, "ELEVATED": 1, "ROUTINE": 2}
+    all_studies = list(_dashboard_worklist.values())
+    if isinstance(user, UserPublic) and user.role == ROLE_CLINICIAN:
+        all_studies = [
+            item for item in all_studies
+            if item.get("owner") in (user.username, "anonymous", None)
+            or item["anonymous_study_instance_uid"] in user.assigned_study_uids
+        ]
     return sorted(
-        _dashboard_worklist.values(),
+        all_studies,
         key=lambda item: (urgency_rank.get(item["overall_triage_urgency"], 9), item["ingested_at_utc"]),
     )
 
 
 @router.get("/api/v1/dashboard/worklist", tags=["Clinical Dashboard"])
-def list_dashboard_worklist():
+def list_dashboard_worklist(current_user: Optional[UserPublic] = Depends(get_current_user)):
     """Returns ingested studies sorted by AI clinical triage urgency then recency."""
-    return {"worklist": _get_sorted_worklist()}
+    return {"worklist": _get_sorted_worklist(current_user if isinstance(current_user, UserPublic) else None)}
 
 
 @router.get("/api/v1/dashboard/studies/{study_uid}/dicom", tags=["Clinical Dashboard"])
 def stream_dashboard_dicom(
     study_uid: str,
     download: bool = False,
+    current_user: Optional[UserPublic] = Depends(get_current_user),
     settings: Settings = Depends(get_settings)
 ):
     """
     Streams decrypted sanitized DICOM Part 10 bytes for Cornerstone3D wadouri rendering
     or attachment download. Fails immediately (HTTP 410) once study KEK is crypto-shredded.
+    Enforces study-level authorization and disables caching.
     """
+    if isinstance(current_user, UserPublic) and not check_study_access(study_uid, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Forbidden: User '{current_user.username}' is not authorized to access study '{study_uid}'"
+        )
+
     store = _dashboard_store.get(settings.storage_path) or EncryptedStore(storage_dir=settings.storage_path)
     if not store.exists(study_uid):
         raise HTTPException(status_code=404, detail="Study not found in encrypted storage")
@@ -504,15 +541,24 @@ def stream_dashboard_dicom(
     return Response(
         content=plaintext_bytes,
         media_type="application/dicom",
-        headers={"Content-Disposition": f'{disposition}; filename="sanitized_{study_uid[-12:]}.dcm"'},
+        headers={
+            "Content-Disposition": f'{disposition}; filename="sanitized_{study_uid[-12:]}.dcm"',
+            "Cache-Control": "no-store, no-cache, must-revalidate, private",
+            "Pragma": "no-cache",
+        },
     )
 
 
 @router.post("/api/v1/dashboard/shred/{study_uid}", tags=["Clinical Dashboard"])
-def demo_crypto_shredding(study_uid: str, settings: Settings = Depends(get_settings)):
+def demo_crypto_shredding(
+    study_uid: str,
+    current_user: Optional[UserPublic] = Depends(require_privacy_officer),
+    settings: Settings = Depends(get_settings)
+):
     """
     Demonstrates India DPDP Act 2023 Section 12 Right to Erasure:
     Revokes the study-specific Master KEK, rendering this exact study mathematically unrecoverable.
+    Restricted to Privacy Officer and Admin roles.
     """
     store = _dashboard_store.get(settings.storage_path) or EncryptedStore(storage_dir=settings.storage_path)
     
@@ -548,7 +594,7 @@ def demo_crypto_shredding(study_uid: str, settings: Settings = Depends(get_setti
         "math_erasure_verified": verification_failed,
         "legal_standard": "India DPDP Act 2023 Section 12 & HIPAA §164.312",
         "message": "Study Master KEK overwritten with zeroes. Ciphertext is now mathematically irreversible noise.",
-        "worklist": _get_sorted_worklist(),
+        "worklist": _get_sorted_worklist(current_user if isinstance(current_user, UserPublic) else None),
     }
 
 
@@ -582,6 +628,7 @@ class ScanChatResponse(BaseModel):
 @router.post("/api/v1/dashboard/chat", response_model=ScanChatResponse, tags=["Clinical Dashboard"])
 async def scan_chat_endpoint(
     req: ScanChatRequest,
+    current_user: Optional[UserPublic] = Depends(require_clinician),
     settings: Settings = Depends(get_settings),
 ):
     """
@@ -592,7 +639,14 @@ async def scan_chat_endpoint(
     4. Evaluates optional Grad-CAM heatmap overlay.
     5. Dispatches zero-PII grounded chat via ScanChatService.
     CRITICAL: Never accesses _dashboard_session_cache.
+    Enforces study-level clinician access control.
     """
+    if isinstance(current_user, UserPublic) and not check_study_access(req.scan_id, current_user):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Forbidden: User '{current_user.username}' is not authorized to query scan '{req.scan_id}'"
+        )
+
     def _prepare_scan_context():
         # Decryption, CNN inference and Grad-CAM are CPU-bound; run off the event loop
         store = _dashboard_store.get(settings.storage_path) or EncryptedStore(storage_dir=settings.storage_path)
@@ -671,7 +725,7 @@ async def scan_chat_endpoint(
 
 
 @router.get("/dashboard", response_class=HTMLResponse, tags=["Clinical Dashboard"])
-def serve_dashboard_ui():
+def serve_dashboard_ui(current_user: Optional[UserPublic] = Depends(get_current_user)):
     """Serves the MedShield-AI Clinical Reading & Security Console UI."""
     return HTMLResponse(content=DASHBOARD_HTML_PAGE)
 

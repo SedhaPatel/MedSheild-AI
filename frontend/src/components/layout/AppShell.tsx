@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Link, NavLink } from 'react-router-dom'
-import { FileLock2, ListChecks, ScanLine } from 'lucide-react'
+import { FileLock2, ListChecks, LogOut, ScanLine } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useWorkstationStore } from '@/stores/useWorkstationStore'
 
@@ -9,6 +9,12 @@ const NAV_ITEMS = [
   { to: '/workstation', label: 'Viewer', icon: ScanLine, end: false },
   { to: '/security', label: 'Audit', icon: FileLock2, end: false },
 ] as const
+
+const ROLE_LABELS: Record<string, string> = {
+  clinician: 'Clinician',
+  privacy_officer: 'Privacy officer',
+  admin: 'Administrator',
+}
 
 function navClass(isActive: boolean) {
   return cn(
@@ -22,6 +28,8 @@ function navClass(isActive: boolean) {
 export function AppShell({ children }: { children: ReactNode }) {
   const activeStudy = useWorkstationStore((s) => s.activeStudy)
   const worklist = useWorkstationStore((s) => s.worklist)
+  const user = useWorkstationStore((s) => s.user)
+  const logout = useWorkstationStore((s) => s.logout)
   const studyCount = worklist.filter((w) => !w.is_shredded).length
 
   return (
@@ -58,6 +66,27 @@ export function AppShell({ children }: { children: ReactNode }) {
               </Link>
             </div>
           )}
+
+          {user && (
+            <div className="flex items-start justify-between gap-2 border-t border-border-subtle pt-3">
+              <div className="min-w-0">
+                <div className="truncate font-medium text-text-primary" title={user.full_name}>
+                  {user.full_name}
+                </div>
+                <div className="text-text-muted">{ROLE_LABELS[user.role] ?? user.role}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => void logout()}
+                title="Sign out"
+                aria-label="Sign out"
+                className="shrink-0 cursor-pointer rounded-[var(--control-radius)] p-1 text-text-muted hover:bg-bg-elevated hover:text-text-primary focus-visible:outline-2 focus-visible:outline-border-focus"
+              >
+                <LogOut className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+          )}
+
           <p className="leading-snug text-text-muted">
             Research and demo use only. Not a diagnostic device.
           </p>
@@ -68,13 +97,23 @@ export function AppShell({ children }: { children: ReactNode }) {
         {/* Compact top bar (below md) */}
         <header className="flex items-center gap-4 border-b border-border-subtle bg-bg-panel px-4 py-2 md:hidden">
           <Link to="/" className="text-[15px] font-semibold tracking-tight">MedShield</Link>
-          <nav aria-label="Main" className="flex gap-1 overflow-x-auto">
+          <nav aria-label="Main" className="flex flex-1 gap-1 overflow-x-auto">
             {NAV_ITEMS.map(({ to, label, end }) => (
               <NavLink key={to} to={to} end={end} className={({ isActive }) => navClass(isActive)}>
                 {label}
               </NavLink>
             ))}
           </nav>
+          {user && (
+            <button
+              type="button"
+              onClick={() => void logout()}
+              aria-label="Sign out"
+              className="cursor-pointer p-1 text-text-muted hover:text-text-primary"
+            >
+              <LogOut className="h-4 w-4" aria-hidden="true" />
+            </button>
+          )}
         </header>
 
         {children}

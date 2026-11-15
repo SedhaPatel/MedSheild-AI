@@ -17,11 +17,14 @@ export function CryptoShredDialog() {
   const activeStudy = useWorkstationStore((s) => s.activeStudy)
   const worklist = useWorkstationStore((s) => s.worklist)
   const cryptoShredActiveStudy = useWorkstationStore((s) => s.cryptoShredActiveStudy)
+  const user = useWorkstationStore((s) => s.user)
 
   const activeUid = activeStudy?.anonymous_study_instance_uid ?? null
   const isShredded = Boolean(
     activeUid && worklist.find((w) => w.anonymous_study_instance_uid === activeUid)?.is_shredded
   )
+  // Matches the backend rule (require_privacy_officer): privacy officers and administrators may erase
+  const canErase = user?.role === 'privacy_officer' || user?.role === 'admin'
 
   return (
     <Panel title="Erase study" aside="DPDP Act Sec. 12">
@@ -31,11 +34,17 @@ export function CryptoShredDialog() {
             ? 'Erased. The study key was destroyed and the stored file can no longer be decrypted.'
             : 'Destroys this study\'s encryption key. The stored file stays on disk but becomes unreadable. Other studies are not affected.'}
         </p>
+        {!canErase && !isShredded && (
+          <p className="text-xs text-text-muted">
+            Only a privacy officer or administrator can erase studies. You are signed in as{' '}
+            {user?.role.replace('_', ' ') ?? 'a guest'}.
+          </p>
+        )}
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <Button
               variant="destructive"
-              disabled={!activeStudy || isShredded}
+              disabled={!activeStudy || isShredded || !canErase}
             >
               Erase study…
             </Button>
