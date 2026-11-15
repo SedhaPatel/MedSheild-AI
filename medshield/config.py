@@ -102,6 +102,11 @@ class Settings(BaseModel):
     # Maximum accepted upload size (DICOM / PNG / JPEG) in megabytes
     max_upload_mb: float = Field(default_factory=lambda: float(os.getenv("MEDSHIELD_MAX_UPLOAD_MB", "100")))
 
+    # Low-memory mode: shrink uploaded images so neither side exceeds this many pixels (0 = keep
+    # full resolution). A full-size radiograph needs ~900 MB peak; 1024 keeps the server under
+    # 512 MB (e.g. Render's free tier). The model only uses 224 x 224 input, so scores barely change.
+    max_image_dim: int = Field(default_factory=lambda: int(os.getenv("MEDSHIELD_MAX_IMAGE_DIM", "0")))
+
     # Built-in demo accounts (published passwords). On by default in development, off in production
     # unless explicitly enabled; production users come from MEDSHIELD_USERS_JSON.
     enable_demo_users: bool = Field(

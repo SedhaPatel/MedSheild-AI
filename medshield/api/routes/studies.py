@@ -12,6 +12,7 @@ from medshield.auth.dependencies import require_clinician, register_study_owner
 from medshield.auth.models import UserPublic
 from medshield.anonymization.metadata import anonymize_dicom_metadata
 from medshield.anonymization.pixel_cleaner import clean_pixel_annotations
+from medshield.utils.dicom_helpers import downscale_dataset, read_dicom_bytes
 from medshield.crypto.envelope import encrypt_envelope
 from medshield.crypto.kms_provider import KMSProvider, LocalKMSProvider
 from medshield.storage.encrypted_store import EncryptedStore
@@ -47,10 +48,13 @@ def process_and_encrypt_study(
         raise ValueError("Uploaded file is empty")
         
     try:
-        ds = pydicom.dcmread(io.BytesIO(contents), force=True)
+        ds = read_dicom_bytes(contents)
     except Exception as e:
         raise ValueError(f"Failed to parse DICOM: {str(e)}")
-        
+
+    # Low-memory deployments (MEDSHIELD_MAX_IMAGE_DIM) shrink large images before any processing
+    downscale_dataset(ds, settings.max_image_dim)
+
     # 1. Metadata De-Identification (PS 3.15 Annex E + Salted UIDs)
     anon_ds = anonymize_dicom_metadata(ds, secret_salt=settings.secret_pepper)
     anon_study_uid = anon_ds.StudyInstanceUID
