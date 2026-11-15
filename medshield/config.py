@@ -102,6 +102,15 @@ class Settings(BaseModel):
     # Maximum accepted upload size (DICOM / PNG / JPEG) in megabytes
     max_upload_mb: float = Field(default_factory=lambda: float(os.getenv("MEDSHIELD_MAX_UPLOAD_MB", "100")))
 
+    # Built-in demo accounts (published passwords). On by default in development, off in production
+    # unless explicitly enabled; production users come from MEDSHIELD_USERS_JSON.
+    enable_demo_users: bool = Field(
+        default_factory=lambda: _parse_bool_env(
+            "MEDSHIELD_ENABLE_DEMO_USERS",
+            os.getenv("MEDSHIELD_ENVIRONMENT", "development").lower() != "production",
+        )
+    )
+
     # Authentication & JWT settings
     jwt_secret_key: str = Field(
         default_factory=lambda: os.getenv("MEDSHIELD_JWT_SECRET_KEY", DEFAULT_JWT_DEV_SECRET),

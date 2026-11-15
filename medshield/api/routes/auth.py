@@ -20,6 +20,14 @@ class CreateUserRequest(BaseModel):
     role: str = Field(..., pattern="^(clinician|privacy_officer|admin)$")
 
 
+@router.get("/options")
+def auth_options():
+    """Public: whether the built-in demo accounts can be used (the login page shows them only then)."""
+    from medshield.auth.users import demo_users_enabled
+
+    return {"demo_accounts_enabled": demo_users_enabled()}
+
+
 @router.post("/login", response_model=Token)
 async def login(
     request: Request,

@@ -27,7 +27,7 @@ class MTLSAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # Exclude genuinely public endpoints: health check, login, and OpenAPI docs (if debug/dev)
         path = request.url.path
-        if path in ("/health", "/api/v1/auth/login"):
+        if path in ("/health", "/api/v1/auth/login", "/api/v1/auth/options"):
             return await call_next(request)
 
         if self.settings.debug and path in ("/docs", "/openapi.json"):
