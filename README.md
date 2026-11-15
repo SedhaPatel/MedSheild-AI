@@ -2,7 +2,7 @@
 
 **Secure, HIPAA & India DPDP-Compliant AI Medical Image Disease Detection System**
 
-> **Production & Cloud Hosting:** See [**DEPLOYMENT.md**](DEPLOYMENT.md) for the complete architecture guide (recommended split Docker PaaS + CDN SPA deployment, unified single-container Docker mode, memory/storage requirements, and environment reference).
+> **Production & Cloud Hosting:** The quickest route is a free Hugging Face Space: follow [**DEPLOYMENT.md → Quick start**](DEPLOYMENT.md#quick-start-hugging-face-spaces-free-single-container). DEPLOYMENT.md also covers the full architecture guide (recommended split Docker PaaS + CDN SPA deployment, unified single-container Docker mode, memory/storage requirements, and environment reference).
 
 ---
 
@@ -409,7 +409,7 @@ Ways to run it:
 
 ### Start Backend API Server (Local Development)
 ```bash
-uvicorn medshield.api.app:app --host 0.0.0.0 --port 8000 --reload --env-file .env
+uvicorn medshield.api.app:app --host 0.0.0.0 --port 8000 --reload   # settings are read from .env automatically
 ```
 > **Production Note:** Always run Uvicorn with `--workers 1` because `LocalKMSProvider` keys, `_dashboard_worklist`, and user registries live in process memory for this prototype.
 
