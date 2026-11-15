@@ -31,8 +31,11 @@ export interface SampleCase {
 
 export interface PredictionItem {
   pathology: string
+  /** Threshold-normalized score (0.5 = model threshold); NOT a calibrated probability. */
   probability: number
-  epistemic_uncertainty: number
+  is_positive?: boolean
+  raw_score?: number
+  operating_threshold?: number
   triage_urgency: TriageUrgency
   gradcam_heatmap_url: string | null
   bounding_box_normalized: number[] | null
@@ -64,6 +67,8 @@ export interface SecurityMetrics {
 export interface DeidentificationSummary {
   burned_in_text_redacted: boolean
   safe_harbor_compliance: string
+  compliance_violations?: string[]
+  date_handling?: string
   uid_root: string
   tag_diff_matrix: PiiTagDiff[]
 }
@@ -74,6 +79,7 @@ export interface AIDiagnosticsSummary {
   weights_source: string
   inference_latency_ms: number
   overall_triage_urgency: TriageUrgency
+  score_semantics?: string
   active_heatmap_pathology: string
   predictions: PredictionItem[]
 }
@@ -129,6 +135,14 @@ export interface ScanChatMessage {
   grounded_findings?: string[]
   timestamp: number
   isError?: boolean
+  /** Heading for system notices, e.g. 'Study erased' or 'Request failed'. */
+  title?: string
+  /** Follow-up questions suggested by the server for this answer. */
+  suggested_questions?: string[]
+  /** True when personal details were removed from the user's question before processing. */
+  pii_redacted?: boolean
+  /** On a failed request: the question to resend when the user clicks Retry. */
+  retryQuestion?: string
 }
 
 export interface ScanChatRequest {
@@ -143,6 +157,7 @@ export interface ScanChatResponse {
   scan_id: string
   provider_used: string
   answer: string
+  suggested_questions?: string[]
   grounded_findings: string[]
   zero_pii_verified: boolean
   pii_redacted_from_prompt: boolean

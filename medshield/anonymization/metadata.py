@@ -1,6 +1,7 @@
 import copy
 import pydicom
 from pydicom.dataset import Dataset
+from pydicom.multival import MultiValue
 from pydicom.sequence import Sequence
 
 from medshield.anonymization.uid_hasher import generate_pseudonymized_uid
@@ -47,6 +48,25 @@ PS315_TAGS_TO_REMOVE = [
     "PerformedProcedureStepDescription"
 ]
 
+# DICOM-defined UIDs (SOP classes, transfer syntaxes, coding schemes) identify *types*, not
+# patients or instances, and must be preserved for the file to remain readable.
+DICOM_STANDARD_UID_ROOT = "1.2.840.10008."
+_NON_INSTANCE_UID_KEYWORDS = {"TransferSyntaxUID", "ImplementationClassUID", "CodingSchemeUID"}
+
+
+def _is_instance_uid(keyword: str, value: str) -> bool:
+    if not value or value.startswith(DICOM_STANDARD_UID_ROOT):
+        return False
+    return not (keyword.endswith("ClassUID") or keyword in _NON_INSTANCE_UID_KEYWORDS)
+
+
+def _pseudonymize_uid_value(keyword: str, value, secret_salt: bytes):
+    if isinstance(value, MultiValue):
+        return [_pseudonymize_uid_value(keyword, v, secret_salt) for v in value]
+    uid = str(value).strip()
+    return generate_pseudonymized_uid(uid, secret_salt) if _is_instance_uid(keyword, uid) else value
+
+
 PS315_TAGS_TO_ZERO = [
     "AccessionNumber",
     "StudyID"
@@ -67,6 +87,10 @@ def _sanitize_dataset_recursively(dataset: Dataset, secret_salt: bytes) -> None:
                     _sanitize_dataset_recursively(item, secret_salt)
         elif elem.keyword in PS315_TAGS_TO_REMOVE:
             del dataset[elem.tag]
+        elif elem.VR == "UI" and elem.value:
+            # Action U: replace every instance UID (Study/Series/SOP, FrameOfReference, referenced
+            # instances in sequences, ...) with a salted HMAC so cross-references stay consistent.
+            elem.value = _pseudonymize_uid_value(elem.keyword, elem.value, secret_salt)
         elif elem.keyword in PS315_TAGS_TO_ZERO:
             elem.value = ""
 
@@ -82,28 +106,20 @@ def anonymize_dicom_metadata(
     ds = copy.deepcopy(dataset)
     
     # 1. Compute patient offset before PatientID is stripped
-    original_patient_id = getattr(ds, "PatientID", "UNKNOWN_PATIENT")
+    original_patient_id = str(getattr(ds, "PatientID", "") or "").strip() or "UNKNOWN_PATIENT"
     day_offset = compute_patient_day_offset(original_patient_id, secret_salt)
     
-    # 2. Pseudonymize UIDs (Action U)
-    if "StudyInstanceUID" in ds:
-        ds.StudyInstanceUID = generate_pseudonymized_uid(ds.StudyInstanceUID, secret_salt)
-    if "SeriesInstanceUID" in ds:
-        ds.SeriesInstanceUID = generate_pseudonymized_uid(ds.SeriesInstanceUID, secret_salt)
-    if "SOPInstanceUID" in ds:
-        ds.SOPInstanceUID = generate_pseudonymized_uid(ds.SOPInstanceUID, secret_salt)
-        
-    # Also update FileMetaInformation if present
-    if hasattr(ds, "file_meta") and ds.file_meta is not None:
-        if "MediaStorageSOPInstanceUID" in ds.file_meta:
-            ds.file_meta.MediaStorageSOPInstanceUID = ds.SOPInstanceUID
-            
     # Assign deterministic anonymous patient ID
     anonymous_patient_id = f"ANON_{generate_pseudonymized_uid(original_patient_id, secret_salt)[5:17]}"
     ds.PatientID = anonymous_patient_id
-    
-    # 3. Purge PHI tags recursively
+
+    # 2-3. Purge PHI tags and pseudonymize all instance UIDs (Action U) recursively
     _sanitize_dataset_recursively(ds, secret_salt)
+
+    # Keep File Meta Information consistent with the pseudonymized SOP Instance UID
+    if hasattr(ds, "file_meta") and ds.file_meta is not None and "SOPInstanceUID" in ds:
+        if "MediaStorageSOPInstanceUID" in ds.file_meta:
+            ds.file_meta.MediaStorageSOPInstanceUID = ds.SOPInstanceUID
     
     # Ensure PatientID wasn't deleted if in remove list
     ds.PatientID = anonymous_patient_id

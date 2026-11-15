@@ -60,6 +60,8 @@ export interface WorkstationState {
   changePathologyHeatmap: (pathology: string) => Promise<void>
   cryptoShredActiveStudy: () => Promise<void>
   askScanQuestion: (question: string) => Promise<void>
+  retryScanQuestion: (noticeId: string) => Promise<void>
+  clearScanChat: () => void
 
   setChatOpen: (open: boolean) => void
   setPreviewHeatmap: (value: boolean | ((prev: boolean) => boolean)) => void
@@ -374,7 +376,8 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
       .filter((m) => m.role !== 'system' && !m.isError)
       .map((m) => ({
         role: m.role as 'user' | 'assistant',
-        content: m.content,
+        // Server caps each history turn at 8000 chars; keep the most recent context only
+        content: m.content.length > 6000 ? `${m.content.slice(0, 6000)}…` : m.content,
       }))
       .slice(-6)
 
@@ -400,6 +403,8 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
         content: resp.answer,
         provider_used: resp.provider_used,
         grounded_findings: resp.grounded_findings,
+        suggested_questions: resp.suggested_questions ?? [],
+        pii_redacted: resp.pii_redacted_from_prompt,
         timestamp: Date.now(),
       }
 
@@ -415,9 +420,10 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
           id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           role: 'system',
           content:
-            'Study cryptographic key has been revoked under DPDP Act Sec. 12 (Right to Erasure). Plaintext image and AI chat context are permanently unrecoverable.',
+            'This study was erased (its encryption key was destroyed under DPDP Act Sec. 12), so it can no longer be queried.',
           timestamp: Date.now(),
           isError: true,
+          title: 'Study erased',
         }
         set((s) => ({
           chatMessagesByStudy: {
@@ -428,9 +434,8 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
         fetchWorklist()
           .then((worklist) => set({ worklist }))
           .catch(() => undefined)
-        toast.error('Study key crypto-shredded', {
-          description:
-            'DPDP Sec. 12 erasure active. This study can no longer be queried.',
+        toast.error('Study erased', {
+          description: 'This study can no longer be queried.',
         })
       } else {
         const errorNotice: ScanChatMessage = {
@@ -440,6 +445,8 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
             err instanceof Error ? err.message : 'Chat assistant query failed',
           timestamp: Date.now(),
           isError: true,
+          title: 'Request failed',
+          retryQuestion: trimmed,
         }
         set((s) => ({
           chatMessagesByStudy: {
@@ -447,13 +454,35 @@ export const useWorkstationStore = create<WorkstationState>((set, get) => ({
             [scanId]: [...(s.chatMessagesByStudy[scanId] ?? []), errorNotice],
           },
         }))
-        toast.error('Scan assistant error', {
+        toast.error('Chat request failed', {
           description: err instanceof Error ? err.message : 'Chat request failed',
         })
       }
     } finally {
       set({ isChatSending: false })
     }
+  },
+
+  retryScanQuestion: async (noticeId) => {
+    const { activeStudy, chatMessagesByStudy, isChatSending } = get()
+    if (!activeStudy || isChatSending) return
+    const scanId = activeStudy.anonymous_study_instance_uid
+    const messages = chatMessagesByStudy[scanId] ?? []
+    const idx = messages.findIndex((m) => m.id === noticeId)
+    const question = idx >= 0 ? messages[idx].retryQuestion : undefined
+    if (!question) return
+    // Drop the failed question and its error notice, then ask again
+    const failedUserIdx = messages.slice(0, idx).map((m) => m.role).lastIndexOf('user')
+    const kept = messages.filter((_, i) => i !== idx && i !== failedUserIdx)
+    set((s) => ({ chatMessagesByStudy: { ...s.chatMessagesByStudy, [scanId]: kept } }))
+    await get().askScanQuestion(question)
+  },
+
+  clearScanChat: () => {
+    const { activeStudy } = get()
+    if (!activeStudy) return
+    const scanId = activeStudy.anonymous_study_instance_uid
+    set((s) => ({ chatMessagesByStudy: { ...s.chatMessagesByStudy, [scanId]: [] } }))
   },
 
   setChatOpen: (chatOpen) => set({ chatOpen }),

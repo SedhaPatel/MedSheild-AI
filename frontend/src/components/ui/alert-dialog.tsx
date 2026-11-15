@@ -13,10 +13,10 @@ export function AlertDialogContent({
 }: ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Content>) {
   return (
     <AlertDialogPrimitive.Portal>
-      <AlertDialogPrimitive.Overlay className="fixed inset-0 z-50 bg-bg-backdrop backdrop-blur-xs" />
+      <AlertDialogPrimitive.Overlay className="fixed inset-0 z-50 bg-bg-backdrop" />
       <AlertDialogPrimitive.Content
         className={cn(
-          'fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-[var(--dialog-radius)] border border-border-strong bg-bg-panel p-6 text-text-primary focus-visible:outline-none',
+          'fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-[var(--dialog-radius)] shadow-[0_8px_32px_rgba(16,24,40,0.16)] border border-border-strong bg-bg-panel p-6 text-text-primary focus-visible:outline-none',
           className
         )}
         {...props}

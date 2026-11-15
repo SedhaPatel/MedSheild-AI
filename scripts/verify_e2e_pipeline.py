@@ -272,7 +272,7 @@ def run_e2e_verification():
         assert post_audit.is_compliant is True, f"Compliance violations: {post_audit.violations}"
         assert len(post_audit.violations) == 0
         assert getattr(post_ds, "BurnedInAnnotation", None) == "NO"
-        print("  [*] Step 6 Passed: 100% HIPAA Safe Harbor and DICOM PS 3.15 Annex E compliant.")
+        print("  [*] Step 6 Passed: 0 identifier-tag violations (DICOM PS 3.15 Annex E; dates shifted, not year-truncated).")
 
         # -------------------------------------------------------------
         # Step 7: Cryptographic Tamper Resistance Verification

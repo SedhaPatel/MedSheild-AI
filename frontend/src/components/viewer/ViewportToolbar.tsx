@@ -53,22 +53,20 @@ export function ViewportToolbar() {
   return (
     <TooltipProvider delayDuration={250}>
       <div
-        className="absolute inset-x-3 bottom-3 z-10 flex flex-wrap items-center justify-between gap-2 rounded-[var(--control-radius)] border border-border-strong bg-bg-panel/95 px-3 py-1.5 backdrop-blur-xs transition-colors duration-150"
+        className="absolute inset-x-0 bottom-0 z-10 flex flex-wrap items-center justify-between gap-2 border-t border-border-subtle bg-bg-panel px-3 py-1.5"
         onMouseDown={(e) => e.stopPropagation()}
       >
         {/* Left group: Pathology Selector + Opacity Mix */}
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-1.5">
-            <span className="text-[11px] font-medium text-text-secondary">
-              Target
-            </span>
+            <span className="text-xs text-text-muted">Heatmap for</span>
             <Select
               value={targetPathology}
               onValueChange={(val) => {
                 void changePathologyHeatmap(val)
               }}
             >
-              <SelectTrigger aria-label="Target pathology for Grad-CAM">
+              <SelectTrigger aria-label="Finding to show the heatmap for">
                 <SelectValue placeholder="Pathology" />
               </SelectTrigger>
               <SelectContent>
@@ -83,11 +81,9 @@ export function ViewportToolbar() {
 
           {viewMode === 'heatmap' && (
             <div className="flex items-center gap-2">
-              <span className="text-[11px] font-medium text-text-secondary">
-                Mix
-              </span>
+              <span className="text-xs text-text-muted">Opacity</span>
               <Slider
-                aria-label="Grad-CAM overlay opacity"
+                aria-label="Heatmap opacity"
                 className="w-20"
                 min={0}
                 max={100}
@@ -198,14 +194,14 @@ export function ViewportToolbar() {
             <TooltipTrigger asChild>
               <a
                 href={getDicomDownloadUrl(activeStudy.anonymous_study_instance_uid, true)}
-                className="inline-flex h-7 items-center gap-1 rounded-[var(--control-radius)] border border-accent-brand-border bg-accent-brand-soft px-2.5 text-[11px] font-medium text-accent-brand-hover transition-colors hover:bg-accent-info-soft focus-visible:outline-2 focus-visible:outline-border-focus"
+                className="ml-1 inline-flex h-7 items-center gap-1 rounded-[var(--control-radius)] border border-border-strong bg-bg-panel px-2.5 text-xs font-medium text-text-primary transition-colors hover:bg-bg-elevated focus-visible:outline-2 focus-visible:outline-border-focus"
                 aria-label="Download scrubbed Part 10 DICOM"
               >
                 <Download className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">DICOM</span>
+                <span className="hidden sm:inline">Download .dcm</span>
               </a>
             </TooltipTrigger>
-            <TooltipContent>Download anonymized Part 10 .dcm</TooltipContent>
+            <TooltipContent>Download the de-identified DICOM file</TooltipContent>
           </Tooltip>
         </div>
       </div>

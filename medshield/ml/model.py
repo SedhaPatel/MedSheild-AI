@@ -1,8 +1,11 @@
 from typing import List, Optional, Tuple
+import logging
 import os
 import torch
 import torch.nn as nn
 import torchvision.models as models
+
+logger = logging.getLogger(__name__)
 
 TARGET_PATHOLOGIES: List[str] = [
     "Pneumonia",
@@ -58,6 +61,10 @@ class ThoracicClassifier(nn.Module):
 
     def get_last_conv_layer_name(self) -> str:
         return "backbone.features.7"
+
+    def operating_thresholds(self) -> List[Optional[float]]:
+        """No tuned operating points: sigmoid outputs are thresholded at 0.5."""
+        return [None] * len(TARGET_PATHOLOGIES)
 
 
 class TorchXRayVisionClassifier(nn.Module):
@@ -179,6 +186,23 @@ class TorchXRayVisionClassifier(nn.Module):
     def get_last_conv_layer_name(self) -> str:
         return "model.features.denseblock4.denselayer16.conv2"
 
+    def operating_thresholds(self) -> List[Optional[float]]:
+        """
+        Per-target operating thresholds on the raw sigmoid output (TorchXRayVision `op_threshs`),
+        or None where unavailable. These were tuned on the training data and are low for rare
+        findings (e.g. ~0.057 for Pneumonia), so raw sigmoid values are not calibrated probabilities.
+        """
+        op_threshs = getattr(self.model, "op_threshs", None)
+        thresholds: List[Optional[float]] = []
+        for idx in self.target_indices:
+            value = float(op_threshs[idx]) if (op_threshs is not None and idx >= 0) else float("nan")
+            thresholds.append(None if value != value else value)  # NaN -> None
+        return thresholds
+
+
+XRV_ARCHITECTURES = ("torchxrayvision", "densenet121")
+EFFICIENTNET_ARCHITECTURES = ("efficientnet_v2_s", "efficientnet")
+
 
 def build_thoracic_model(
     checkpoint_path: Optional[str] = None,
@@ -187,23 +211,34 @@ def build_thoracic_model(
 ) -> nn.Module:
     """
     Factory constructing the clinical disease detection model.
-    Prioritizes real pre-trained TorchXRayVision medical weights if available,
-    with graceful fallback to ThoracicClassifier.
+
+    - "torchxrayvision" / "densenet121" (default): pre-trained TorchXRayVision DenseNet-121, optionally
+      from a local checkpoint; falls back to ThoracicClassifier if it cannot be constructed.
+    - "efficientnet_v2_s": ThoracicClassifier. It has NO pre-trained clinical weights, so a
+      checkpoint_path is required for meaningful predictions.
     """
-    if pretrained:
-        cache_dir = os.path.abspath("weights")
-        weights_file = os.path.join(cache_dir, "nih-pc-chex-mimic_ch-google-openi-kaggle-densenet121-d121-tw-lr001-rot45-tr15-sc15-seed0-best.pt")
-        
-        if architecture in ("torchxrayvision", "densenet121") or os.path.exists(weights_file) or checkpoint_path:
-            try:
-                model = TorchXRayVisionClassifier(checkpoint_path=checkpoint_path)
-                return model
-            except Exception:
-                pass
-                
-    # Fallback / explicit non-pretrained architecture
+    arch = (architecture or "torchxrayvision").strip().lower()
+    if arch not in XRV_ARCHITECTURES + EFFICIENTNET_ARCHITECTURES:
+        raise ValueError(
+            f"Unknown model architecture '{architecture}'. "
+            f"Expected one of {XRV_ARCHITECTURES + EFFICIENTNET_ARCHITECTURES}."
+        )
+
+    if pretrained and arch in XRV_ARCHITECTURES:
+        try:
+            return TorchXRayVisionClassifier(checkpoint_path=checkpoint_path)
+        except Exception:
+            logger.warning("TorchXRayVision model unavailable; falling back to untrained ThoracicClassifier",
+                           exc_info=True)
+            return ThoracicClassifier(num_classes=len(TARGET_PATHOLOGIES))
+
     model = ThoracicClassifier(num_classes=len(TARGET_PATHOLOGIES))
     if checkpoint_path and os.path.exists(checkpoint_path):
         state_dict = torch.load(checkpoint_path, map_location="cpu")
         model.load_state_dict(state_dict)
+        model.is_real_weights = True
+        model.weights_source = f"Local checkpoint: {os.path.basename(checkpoint_path)}"
+    elif pretrained:
+        logger.warning("ThoracicClassifier has no trained weights; predictions are not clinically meaningful. "
+                       "Set MEDSHIELD_MODEL_CHECKPOINT_PATH or use MEDSHIELD_MODEL_ARCHITECTURE=torchxrayvision.")
     return model

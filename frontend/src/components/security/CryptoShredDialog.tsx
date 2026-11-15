@@ -1,4 +1,3 @@
-import { Trash2 } from 'lucide-react'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -11,6 +10,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { Panel } from '@/components/layout/Panel'
 import { useWorkstationStore } from '@/stores/useWorkstationStore'
 
 export function CryptoShredDialog() {
@@ -23,63 +23,41 @@ export function CryptoShredDialog() {
   const isShredded = Boolean(
     activeUid && worklist.find((w) => w.anonymous_study_instance_uid === activeUid)?.is_shredded
   )
-  const isPrivacyOfficer = user?.role === 'privacy_officer'
+  // Matches the backend rule (require_privacy_officer): privacy officers and administrators may erase
+  const canErase = user?.role === 'privacy_officer' || user?.role === 'admin'
 
   return (
-    <section
-      aria-label="DPDP Right to Erasure"
-      className="overflow-hidden rounded-[var(--panel-radius)] border border-border-subtle bg-bg-panel"
-    >
-      <div className="flex items-center justify-between border-b border-border-subtle bg-bg-input px-4 py-3">
-        <div className="flex items-center gap-2 text-[13px] font-semibold text-text-primary">
-          <Trash2 className="h-4 w-4 text-accent-critical" aria-hidden="true" />
-          <span>Right to Erasure</span>
-        </div>
-        <span className="text-[11px] font-medium text-text-muted">DPDP Sec. 12</span>
-      </div>
-
-      <div className="space-y-2.5 p-3.5">
-        <div
-          className={
-            isShredded
-              ? 'font-mono text-[11px] font-semibold text-accent-critical'
-              : 'font-mono text-[11px] text-text-muted'
-          }
-        >
+    <Panel title="Erase study" aside="DPDP Act Sec. 12">
+      <div className="space-y-3 px-4 py-3 text-[13px]">
+        <p className={isShredded ? 'text-accent-critical' : 'text-text-secondary'}>
           {isShredded
-            ? 'Crypto-shredded. Study KEK destroyed.'
-            : activeStudy
-              ? `Key: ${activeStudy.security.kms_master_key_id.slice(-22)}`
-              : 'Study key isolated per UID'}
-        </div>
-
-        {!isPrivacyOfficer && (
-          <div className="rounded-[var(--control-radius)] border border-accent-attention-border bg-accent-attention-soft p-2 text-[11px] text-accent-attention">
-            RBAC Notice: Cryptographic shredding requires <strong>Privacy Officer</strong> role. Your role ({user?.role ?? 'guest'}) has read-only audit access.
-          </div>
+            ? 'Erased. The study key was destroyed and the stored file can no longer be decrypted.'
+            : 'Destroys this study\'s encryption key. The stored file stays on disk but becomes unreadable. Other studies are not affected.'}
+        </p>
+        {!canErase && !isShredded && (
+          <p className="text-xs text-text-muted">
+            Only a privacy officer or administrator can erase studies. You are signed in as{' '}
+            {user?.role.replace('_', ' ') ?? 'a guest'}.
+          </p>
         )}
-
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <Button
               variant="destructive"
-              className="w-full"
-              disabled={!activeStudy || isShredded || !isPrivacyOfficer}
+              disabled={!activeStudy || isShredded || !canErase}
             >
-              Crypto-Shred Study
+              Erase study…
             </Button>
           </AlertDialogTrigger>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>
-                Confirm Irreversible Cryptographic Erasure
+                Erase this study?
               </AlertDialogTitle>
               <AlertDialogDescription>
-                Under India DPDP Act 2023 Section 12, this destroys the study-scoped Master KEK (
-                <span className="font-mono text-text-primary">
-                  {activeStudy?.security.kms_master_key_id.slice(-24)}
-                </span>
-                ) by overwriting key bytes with zeroes. Other ingested studies remain unaffected, while this study&apos;s DICOM payload becomes permanently undecryptable noise.
+                This destroys the encryption key for{' '}
+                <span className="font-medium text-text-primary">{activeStudy?.file_name}</span> (right to erasure,
+                India DPDP Act 2023 Sec. 12). The stored file can never be decrypted again. This cannot be undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -93,14 +71,14 @@ export function CryptoShredDialog() {
                     void cryptoShredActiveStudy()
                   }}
                 >
-                  Destroy Study Key
+                  Erase permanently
                 </Button>
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
       </div>
-    </section>
+    </Panel>
   )
 }
 

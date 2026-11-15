@@ -1,101 +1,57 @@
 import { useState } from 'react'
-import { Lock } from 'lucide-react'
 import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
+import { Panel } from '@/components/layout/Panel'
 import { useWorkstationStore } from '@/stores/useWorkstationStore'
+
+function Field({ label, aside, children }: { label: string; aside?: string; children: React.ReactNode }) {
+  return (
+    <div className="px-4 py-2.5">
+      <div className="flex items-baseline justify-between gap-2 text-xs">
+        <span className="text-text-muted">{label}</span>
+        {aside && <span className="text-text-muted">{aside}</span>}
+      </div>
+      <div className="mt-1">{children}</div>
+    </div>
+  )
+}
 
 export function EnvelopeInspector() {
   const activeStudy = useWorkstationStore((s) => s.activeStudy)
   const [copied, setCopied] = useState(false)
 
-  const entropy = activeStudy?.security.shannon_entropy_bits_per_byte
-  const entropyPct = entropy ? Math.min(100, (entropy / 8.0) * 100) : 0
-  const passed = Boolean(entropy && entropy >= 7.99)
+  if (!activeStudy) return null
+  const sec = activeStudy.security
+  const entropy = sec.shannon_entropy_bits_per_byte
 
   function copyDigest() {
-    if (!activeStudy) return
-    void navigator.clipboard.writeText(activeStudy.security.sha256_hash)
+    void navigator.clipboard.writeText(sec.sha256_hash)
     setCopied(true)
-    toast.info('SHA-256 digest copied')
+    toast('SHA-256 copied')
     setTimeout(() => setCopied(false), 2000)
   }
 
   return (
-    <section
-      aria-label="AES-256-GCM Envelope Inspection"
-      className="overflow-hidden rounded-[var(--panel-radius)] border border-border-subtle bg-bg-panel"
-    >
-      <div className="flex items-center justify-between border-b border-border-subtle bg-bg-input px-4 py-3">
-        <div className="flex items-center gap-2 text-[13px] font-semibold text-text-primary">
-          <Lock className="h-4 w-4 text-accent-teal" aria-hidden="true" />
-          <span>Envelope Storage</span>
-        </div>
-        <Badge variant="teal">FIPS 140-3</Badge>
-      </div>
-
-      <div className="divide-y divide-border-subtle px-3.5 py-2.5">
-        {/* Shannon Entropy */}
-        <div className="pb-3">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] font-medium text-text-secondary">
-              Shannon Entropy
-            </span>
-            <Badge variant={passed ? 'verified' : 'neutral'}>
-              {entropy ? (passed ? 'Randomness Passed' : 'Below 7.99') : 'Target >= 7.99'}
-            </Badge>
-          </div>
-          <div className="mt-1 flex items-baseline gap-1.5">
-            <span className="font-mono text-base font-semibold text-text-primary tabular-nums">
-              {entropy !== undefined ? entropy.toFixed(5) : '--'}
-            </span>
-            <span className="text-[11px] text-text-muted">/ 8.00 bits/byte</span>
-          </div>
-          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-border-subtle">
-            <div
-              className="h-full rounded-full bg-accent-verified transition-all duration-300"
-              style={{ width: `${entropyPct}%` }}
-            />
-          </div>
-        </div>
-
-        {/* SHA-256 Digest */}
-        <div className="py-2.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-medium text-text-secondary">
-              Ciphertext SHA-256
-            </span>
-            <span className="text-[11px] text-text-muted">
-              {copied ? 'Copied' : 'Click to copy'}
-            </span>
-          </div>
+    <Panel title="Encrypted storage" aside="AES-256-GCM envelope">
+      <div className="divide-y divide-border-subtle text-[13px]">
+        <Field label="Size">{sec.storage_file_size_bytes.toLocaleString()} bytes</Field>
+        <Field label="Ciphertext entropy" aside="random data ≈ 8.00">
+          <span className="font-mono tabular-nums">{entropy.toFixed(4)}</span>
+          <span className="text-text-muted"> bits/byte {entropy >= 7.99 ? '(consistent with encryption)' : '(lower than expected)'}</span>
+        </Field>
+        <Field label="SHA-256" aside={copied ? 'Copied' : undefined}>
           <button
             type="button"
-            disabled={!activeStudy}
             onClick={copyDigest}
-            className="mt-1.5 w-full cursor-pointer break-all rounded-[var(--control-radius)] border border-border-subtle bg-bg-input px-2 py-1.5 text-left font-mono text-[11px] leading-snug text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+            title="Copy to clipboard"
+            className="w-full cursor-pointer text-left font-mono text-xs leading-snug break-all text-text-secondary hover:text-text-primary"
           >
-            {activeStudy ? activeStudy.security.sha256_hash : '--'}
+            {sec.sha256_hash}
           </button>
-        </div>
-
-        {/* Wire Header Hex */}
-        <div className="pt-2.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-medium text-text-secondary">
-              Wire Header (64 B)
-            </span>
-            <span className="font-mono text-[11px] text-text-muted tabular-nums">
-              {activeStudy
-                ? `${activeStudy.security.storage_file_size_bytes.toLocaleString()} B`
-                : '-- B'}
-            </span>
-          </div>
-          <div className="mt-1.5 break-all rounded-[var(--control-radius)] border border-border-subtle bg-bg-input px-2 py-1.5 font-mono text-[11px] leading-snug text-text-secondary">
-            {activeStudy ? activeStudy.security.hex_preview_64b : '--'}
-          </div>
-        </div>
+        </Field>
+        <Field label="Header (first 64 bytes)">
+          <code className="block font-mono text-xs leading-snug break-all text-text-secondary">{sec.hex_preview_64b}</code>
+        </Field>
       </div>
-    </section>
+    </Panel>
   )
 }
-
