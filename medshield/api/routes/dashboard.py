@@ -42,7 +42,7 @@ from medshield.verification.entropy_analyzer import calculate_shannon_entropy
 from medshield.api.routes.inference import _shared_engine
 from medshield.ml.chat_service import ScanChatService
 from medshield.ml.offline_assistant import detect_topics, is_heatmap_question
-from medshield.utils.dicom_helpers import extract_pixel_array, write_pixel_array_to_dataset
+from medshield.utils.dicom_helpers import downscale_dataset, extract_pixel_array, read_dicom_bytes, write_pixel_array_to_dataset
 
 router = APIRouter(tags=["Clinical Dashboard"])
 
@@ -247,7 +247,7 @@ def analyze_dashboard_study(
             raise HTTPException(status_code=404, detail=f"Study '{study_uid}' not found in encrypted storage.")
         encrypted_container = store.load(study_uid)
         decrypted_bytes = _decrypt_study_or_http_error(encrypted_container)
-        inference_ds = pydicom.dcmread(io.BytesIO(decrypted_bytes), force=True)
+        inference_ds = read_dicom_bytes(decrypted_bytes)
         anon_study_uid = study_uid
         study_kek_id = f"{settings.kms_master_key_id}:{anon_study_uid}"
         saved_path = os.path.join(settings.storage_path, f"{anon_study_uid}.enc")
@@ -308,7 +308,7 @@ def analyze_dashboard_study(
             if is_png:
                 raw_ds = _png_bytes_to_dicom(raw_bytes, patient_name="DOE^SUSPECT_CLINICAL")
             else:
-                raw_ds = pydicom.dcmread(io.BytesIO(raw_bytes), force=True)
+                raw_ds = read_dicom_bytes(raw_bytes)
                 if not hasattr(raw_ds, "file_meta") or raw_ds.file_meta is None:
                     raw_ds.file_meta = FileMetaDataset()
                 if not getattr(raw_ds.file_meta, "TransferSyntaxUID", None):
@@ -319,6 +319,10 @@ def analyze_dashboard_study(
                     raw_ds.file_meta.MediaStorageSOPInstanceUID = getattr(raw_ds, "SOPInstanceUID", generate_uid())
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid DICOM/radiograph payload: {str(e)}")
+        del raw_bytes  # parsed into raw_ds; don't keep a second copy of the upload alive
+
+        # Low-memory deployments (MEDSHIELD_MAX_IMAGE_DIM) shrink large images before any processing
+        downscale_dataset(raw_ds, settings.max_image_dim)
 
         # Capture original image data URL before redaction
         raw_image_data_url = _dataset_to_base64_png(raw_ds)
@@ -391,7 +395,7 @@ def analyze_dashboard_study(
 
         # Step 5: In-Memory Deep Learning Diagnostic Inference
         decrypted_bytes = decrypt_envelope(encrypted_container, _dashboard_kms)
-        inference_ds = pydicom.dcmread(io.BytesIO(decrypted_bytes), force=True)
+        inference_ds = read_dicom_bytes(decrypted_bytes)
 
     compliance_report = ComplianceScanner().scan_dataset(inference_ds)
 
@@ -657,7 +661,7 @@ async def scan_chat_endpoint(
         # Always decrypt: a shredded or unreadable study must fail here even if results are cached
         decrypted_bytes = _decrypt_study_or_http_error(enc_blob)
 
-        cleaned_ds = pydicom.dcmread(io.BytesIO(decrypted_bytes), force=True)
+        cleaned_ds = read_dicom_bytes(decrypted_bytes)
 
         # Model scores and heatmaps are cached per exact ciphertext, so follow-up questions
         # don't re-run the CNN; a re-ingested study has a different ciphertext and a fresh entry.
