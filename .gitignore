@@ -30,3 +30,8 @@ users.json
 # Private deployment settings (secrets)
 deploy/huggingface/*.env
 deploy/render/*.env
+
+# Local presentation materials
+MedShield_AI_Presentation.pdf
+MedShield_AI_Presentation_Script.pdf
+MedShield_AI_Presentation_and_Demo_Guide.pdf
